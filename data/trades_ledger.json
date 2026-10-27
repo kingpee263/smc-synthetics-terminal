@@ -1,0 +1,10 @@
+{
+  "account": {
+    "startingBalance": 40.0,
+    "riskPct": 2.5,
+    "currentBalance": 40.0,
+    "currency": "USD",
+    "updatedAt": 1730067600000
+  },
+  "trades": []
+}
