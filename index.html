@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/app.css?v=3.0" />
+  <link rel="stylesheet" href="css/app.css?v=5.0" />
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -46,13 +46,13 @@
     </div>
 
     <div class="feeds" id="feedStatus">
-      <span class="feed" data-feed="deriv"><i></i>Deriv WS</span>
-      <span class="feed" data-feed="mt5"><i></i>Weltrade / MT5 Bridge</span>
+      <span class="feed live" data-feed="deriv"><i></i>Deriv MT5 (#32398784)</span>
+      <span class="feed live" data-feed="mt5"><i></i>Weltrade MT5 (#43374418)</span>
     </div>
 
     <div class="top-actions">
-      <label class="tog" style="background:rgba(8,153,129,0.14); border:1px solid #089981; padding:4px 8px; border-radius:4px; color:#26a69a; font-weight:700;" title="Automatically place Limit Orders, SL, TP, and trail stops at X1/X2/X3 on your MT5 app">
-        <input type="checkbox" id="togAutoTrade" checked /> ⚡ MT5 Full Auto-Trade
+      <label class="tog" style="background:rgba(8,153,129,0.14); border:1px solid #089981; padding:4px 8px; border-radius:4px; color:#26a69a; font-weight:700;" title="Automatically execute Pure A+ Limit Orders, SL, TP, and X1/X2/X3 trailing stops on Deriv (#32398784) &amp; Weltrade (#43374418)">
+        <input type="checkbox" id="togAutoTrade" checked /> ⚡ Pure A+ Auto-Trade (Deriv &amp; Weltrade)
       </label>
       <button class="icon-btn" id="alertBtn" title="Audio &amp; desktop alerts">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -64,8 +64,10 @@
   </header>
 
   <nav class="viewtabs">
-    <button class="vt active" data-view="terminal">SMC Strategy Desk</button>
-    <button class="vt" data-view="signals">Auto-Signals &amp; MT5 Queue <span class="sig-count" id="pureSigCount">0</span></button>
+    <button class="vt active" data-view="deriv-charts">📈 Deriv Charts (#32398784)</button>
+    <button class="vt" data-view="weltrade-charts">📊 Weltrade Charts (#43374418)</button>
+    <button class="vt" data-view="deriv-signals">⚡ Deriv Signals <span class="sig-count" id="derivSigCount">0</span></button>
+    <button class="vt" data-view="weltrade-signals">🔥 Weltrade Signals <span class="sig-count" id="weltradeSigCount">0</span></button>
     <button class="vt" data-view="backtest">Backtester</button>
     <button class="vt" data-view="journal">Trade Journal</button>
     <button class="vt" data-view="playbook">Book Rules &amp; MT5 Setup</button>
@@ -73,14 +75,18 @@
     <div class="dst-note" id="dstNote"></div>
   </nav>
 
-  <!-- ============ CHART WORKSPACE ============ -->
+  <!-- ============ CHART WORKSPACE (DERIV CHARTS & WELTRADE CHARTS) ============ -->
   <main class="view active" id="view-terminal">
     <aside class="watchlist">
       <div class="wl-head">
-        <input type="search" id="wlSearch" placeholder="Search Deriv or Weltrade symbol (V75, Boom, PainX, GainX)…" />
+        <div id="wlBrokerBanner" style="display:flex; justify-content:space-between; align-items:center; padding:4px 6px; margin-bottom:6px; border-radius:4px; background:rgba(41,98,255,0.14); border:1px solid rgba(41,98,255,0.35); font-size:11px; font-weight:700; color:#fff;">
+          <span id="wlBrokerTitle">DERIV MT5 CHARTS (#32398784)</span>
+          <span class="st-pill st-live" id="wlBrokerBadge">LIVE</span>
+        </div>
+        <input type="search" id="wlSearch" placeholder="Search Deriv or Weltrade symbol (V75, Boom, FX Vol, PainX, GainX)…" />
         <div class="wl-cats" id="wlCats">
           <button data-cat="all" class="active">All Pairs</button>
-          <button data-cat="deriv_vol">Volatility</button>
+          <button data-cat="deriv_vol">Deriv Volatility</button>
           <button data-cat="deriv_boom">Boom / Crash</button>
           <button data-cat="deriv_step">Step / Jump</button>
           <button data-cat="deriv_dex">DEX / Break</button>
@@ -88,46 +94,53 @@
           <button data-cat="forex">Gold &amp; FX</button>
         </div>
         <label class="tog small" style="margin-top:4px;">
-          <input type="checkbox" id="wlActiveOnly" /> Active SMC setups only
+          <input type="checkbox" id="wlActiveOnly" /> Pure A+ / Active SMC setups only
         </label>
       </div>
       <div class="wl-body" id="wlBody"></div>
       <div class="wl-foot" id="wlFoot"></div>
     </aside>
 
-    <section class="center">
+    <section class="center" id="chartCenterSection">
       <div class="chart-toolbar">
         <div class="seg small" id="chartModeSeg" title="Switch between SMC Strategy Desk and Live Broker Chart">
-          <button data-mode="tri" class="active">Broker + SMC</button>
-          <button data-mode="crt">SMC Desk Only</button>
+          <button data-mode="crt" class="active">SMC Markings (HTF + LTF)</button>
+          <button data-mode="tri">Broker + SMC</button>
           <button data-mode="broker">Live Broker Only</button>
         </div>
         <div class="seg small" id="layoutSeg">
-          <button data-layout="tri" class="active" title="Tri-View: Live Broker Chart + HTF Structure + LTF Execution">Tri-View</button>
-          <button data-layout="broker-ltf" title="Live Broker Chart + LTF Execution">Broker + LTF</button>
-          <button data-layout="split" title="Dual Pane: HTF + LTF">HTF + LTF</button>
+          <button data-layout="split" class="active" title="Dual Pane: HTF Structure + LTF Execution">HTF + LTF</button>
+          <button data-layout="ltf" title="Full LTF Execution &amp; OB Markings">LTF Full</button>
+          <button data-layout="htf" title="Full HTF BOS &amp; Premium/Discount Markings">HTF Full</button>
+          <button data-layout="tri" title="Tri-View: Live Broker Chart + HTF + LTF">Tri-View</button>
           <button data-layout="broker" title="Official Live Broker Chart Full">Broker Full</button>
-          <button data-layout="htf">HTF</button>
-          <button data-layout="ltf">LTF</button>
         </div>
-        <label class="tog" title="Toggle Live Broker Chart inside Strategy Desk"><input type="checkbox" id="togBrokerChart" checked /> Live Broker Chart</label>
         <label class="tog"><input type="checkbox" id="togPositionBox" checked /> Position Tool</label>
         <label class="tog"><input type="checkbox" id="togSessions" checked /> Sessions</label>
         <label class="tog"><input type="checkbox" id="togOte" checked /> Fib 50–79%</label>
         <label class="tog"><input type="checkbox" id="togKl" checked /> OB / FVG / IDM</label>
+        <label class="tog" title="Toggle Live Broker Chart"><input type="checkbox" id="togBrokerChart" /> Broker Web</label>
         <div class="tb-spacer"></div>
-        <button class="btn ghost" id="liveEdgeBtn" title="Snap charts to live current market candle">Live Price</button>
-        <button class="btn ghost" id="jumpBtn" title="Center on selected SMC setup">Focus Setup</button>
-        <button class="btn ghost" id="reloadBtn" title="Refresh candle history">Refresh</button>
+        <button class="btn ghost small" id="zoomInBtn" title="Zoom In on SMC Setup &amp; Drawings">🔍+ Zoom In</button>
+        <button class="btn ghost small" id="zoomOutBtn" title="Zoom Out on Chart">🔍− Zoom Out</button>
+        <button class="btn primary small" id="fullScreenChartBtn" title="Full Screen Zoom Charts &amp; SMC Drawings (ESC to exit)">⛶ Full Screen Zoom</button>
+        <button class="btn ghost small" id="liveEdgeBtn" title="Snap charts to live current market candle">Live Price</button>
+        <button class="btn ghost small" id="jumpBtn" title="Center &amp; Zoom on selected SMC setup">Focus Setup</button>
+        <button class="btn ghost small" id="reloadBtn" title="Refresh candle history">Refresh</button>
       </div>
 
-      <div class="charts" id="charts" data-layout="tri" data-mode="tri">
+      <div class="charts" id="charts" data-layout="split" data-mode="crt">
         <div class="chart-card" id="htfCard">
           <div class="chart-head">
             <span class="tf-pill" id="htfPill">H1</span>
             <span class="chart-title">HTF Structure · BOS / CHoCH · Premium / Discount &amp; POI</span>
             <span class="chart-timer mono" id="htfTimer" title="Time remaining until HTF candle closes">--:--</span>
             <span class="chart-sub" id="htfSub"></span>
+            <div style="margin-left:auto; display:flex; gap:4px;">
+              <button class="btn ghost small" id="htfZoomInBtn" style="padding:1px 6px;" title="Zoom In HTF">+</button>
+              <button class="btn ghost small" id="htfZoomOutBtn" style="padding:1px 6px;" title="Zoom Out HTF">−</button>
+              <button class="btn ghost small" id="htfFullBtn" style="padding:1px 7px;" title="Full-Screen Zoom HTF Structure &amp; Order Blocks">⛶ Full HTF</button>
+            </div>
           </div>
           <div class="chart-host" id="htfChart"></div>
         </div>
@@ -137,6 +150,11 @@
             <span class="chart-title">LTF Execution · IDM Sweep · Adv CHoCH · OB Limit &amp; X1–X3 Trail</span>
             <span class="chart-timer mono" id="ltfTimer" title="Time remaining until LTF candle closes">--:--</span>
             <span class="chart-sub" id="ltfSub"></span>
+            <div style="margin-left:auto; display:flex; gap:4px;">
+              <button class="btn ghost small" id="ltfZoomInBtn" style="padding:1px 6px;" title="Zoom In LTF">+</button>
+              <button class="btn ghost small" id="ltfZoomOutBtn" style="padding:1px 6px;" title="Zoom Out LTF">−</button>
+              <button class="btn ghost small" id="ltfFullBtn" style="padding:1px 7px;" title="Full-Screen Zoom LTF Execution &amp; Trail Markings">⛶ Full LTF</button>
+            </div>
           </div>
           <div class="chart-host" id="ltfChart"></div>
         </div>
@@ -223,29 +241,44 @@
     </aside>
   </main>
 
-  <!-- ============ SIGNALS ============ -->
+  <!-- ============ SIGNALS (SEPARATED: DERIV SIGNALS & WELTRADE SIGNALS) ============ -->
   <main class="view" id="view-signals">
     <section class="signals-page">
       <div class="card signals-hero">
         <div>
-          <h2 style="font-size:14px; font-weight:700; color:#d1d4dc;">Frank Miller SMC Full Auto-Trading Scanner — Deriv &amp; Weltrade MT5</h2>
+          <h2 id="signalsHeroTitle" style="font-size:14px; font-weight:700; color:#d1d4dc;">Frank Miller SMC Pure A+ Auto-Trading Scanner — Deriv (#32398784) &amp; Weltrade (#43374418)</h2>
           <p class="muted small" style="margin-top:3px;">
-            Enforces all 5 book steps (Ch. 7 &amp; 8): HTF BOS/CHoCH (body-close confirmed) → Premium/Discount POI with Liquidity Sweep + Imbalance → Inducement (IDM) swept → LTF Advanced CHoCH / CBS Engulfing → Limit Order at LTF Order Block + X1/X2/X3 Trailing Stops.
+            Strictly Pure A+ (7/7 Confluence) Setups Only: HTF BOS/CHoCH (body-close) → Premium/Discount Valid OB (Sweep + FVG) → Inducement (IDM) Swept → LTF Adv CHoCH + OB Limit → Auto Breakeven &amp; X1/X2/X3 Trailing Stops.
           </p>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <button class="btn primary" id="scanPureSignalsBtn">Scan All Synthetics</button>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <div class="seg small" id="sigBrokerFilterSeg">
+            <button data-sbroker="all">All Signals</button>
+            <button data-sbroker="deriv" class="active">⚡ Deriv Signals (#32398784)</button>
+            <button data-sbroker="weltrade">🔥 Weltrade Signals (#43374418)</button>
+          </div>
+          <button class="btn primary" id="scanPureSignalsBtn">Scan Deriv &amp; Weltrade Now</button>
         </div>
       </div>
 
       <div class="kpis" id="signalsKpis"></div>
 
-      <div>
-        <div class="card-head" style="margin-bottom:6px;">
-          <span>Active High-Probability SMC Order Block Setups</span>
-          <span class="muted small" id="activeSignalsCount"></span>
+      <!-- 1. DERIV SIGNALS SECTION -->
+      <div id="derivSignalsSection" class="card" style="border-left:3px solid #2962ff; margin-bottom:10px;">
+        <div class="card-head" style="margin-bottom:8px;">
+          <span style="color:#90bff9; font-weight:700;">⚡ DERIV SYNTHETICS — PURE A+ SIGNALS &amp; AUTO-EXECUTION (MT5 Account #32398784 · Deriv-Demo)</span>
+          <span class="muted small" id="derivSignalsSub">0 active Pure A+ setups</span>
         </div>
-        <div class="signals-grid" id="pureSignalsGrid"></div>
+        <div class="signals-grid" id="derivSignalsGrid"></div>
+      </div>
+
+      <!-- 2. WELTRADE SIGNALS SECTION -->
+      <div id="weltradeSignalsSection" class="card" style="border-left:3px solid #089981; margin-bottom:10px;">
+        <div class="card-head" style="margin-bottom:8px;">
+          <span style="color:#26a69a; font-weight:700;">🔥 WELTRADE SYNTX — PURE A+ SIGNALS &amp; AUTO-EXECUTION (MT5 Account #43374418 · Weltrade-Demo)</span>
+          <span class="muted small" id="weltradeSignalsSub">0 active Pure A+ setups</span>
+        </div>
+        <div class="signals-grid" id="weltradeSignalsGrid"></div>
       </div>
 
       <div class="card" style="margin-top:10px;">
@@ -464,12 +497,12 @@
 
   <div class="toasts" id="toasts"></div>
 
-  <script src="js/time.js?v=4.0"></script>
-  <script src="js/feeds.js?v=4.0"></script>
-  <script src="js/engine.js?v=4.0"></script>
-  <script src="js/ml.js?v=4.0"></script>
-  <script src="js/backtest.js?v=4.0"></script>
-  <script src="js/chart.js?v=4.0"></script>
-  <script src="js/app.js?v=4.0"></script>
+  <script src="js/time.js?v=5.0"></script>
+  <script src="js/feeds.js?v=5.0"></script>
+  <script src="js/engine.js?v=5.0"></script>
+  <script src="js/ml.js?v=5.0"></script>
+  <script src="js/backtest.js?v=5.0"></script>
+  <script src="js/chart.js?v=5.0"></script>
+  <script src="js/app.js?v=5.0"></script>
 </body>
 </html>

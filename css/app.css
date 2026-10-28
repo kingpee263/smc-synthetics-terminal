@@ -1232,3 +1232,40 @@ html, body {
   #view-backtest.active, #view-journal.active, .pb, .steps { grid-template-columns: 1fr; }
   .pb .span2 { grid-column: span 1; }
 }
+
+/* ============ FULL-SCREEN ZOOM FOR DERIV & WELTRADE SMC CHARTS ============ */
+.center.fullscreen-workspace {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 950 !important;
+  background: var(--bg-0) !important;
+  padding: 8px !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.center.fullscreen-workspace .charts {
+  flex: 1 !important;
+  height: calc(100vh - 54px) !important;
+  min-height: calc(100vh - 54px) !important;
+}
+
+.center.fullscreen-workspace .setups-card {
+  display: none !important;
+}
+
+.chart-card.fullscreen-pane {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 960 !important;
+  background: var(--bg-1) !important;
+  border-radius: 0 !important;
+}
+
+.chart-card.fullscreen-pane .chart-host {
+  height: calc(100vh - 38px) !important;
+}

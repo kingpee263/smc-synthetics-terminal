@@ -14,8 +14,12 @@
 
   const state = {
     marketId: '1HZ15V',
+    lastDerivMarketId: '1HZ15V',
+    lastWeltradeMarketId: 'mt5:FX Vol 20',
+    chartBrokerMode: 'deriv', // 'deriv' | 'weltrade' | 'all'
+    signalBrokerFilter: 'all', // 'all' | 'deriv' | 'weltrade'
     pairKey: '1H_5m',
-    layout: 'tri',
+    layout: 'split',
     wlCategory: 'all',
     wlActiveOnly: false,
     entryModelView: 'model1',
@@ -23,15 +27,15 @@
     showSessions: true,
     showOte: true,
     showKl: true,
-    showBrokerChart: true,
-    chartMode: 'tri',
+    showBrokerChart: false,
+    chartMode: 'crt',
     autoTradeEnabled: true,
     autoTrailEnabled: true,
     alertsOn: true,
     tgToken: '',
     tgChat: '',
-    startBalance: 9334.00,
-    balance: 9334.00,
+    startBalance: 9363.52,
+    balance: 9363.52,
     riskPct: 1.0,
     maxOpenTrades: 3,
     maxRiskPerTradePct: 2.5,
@@ -50,6 +54,17 @@
     permanentTrades: [],
     journal: []
   };
+
+  function isWeltradeMarket(market) {
+    if (!market) return false;
+    return market.cat === 'weltrade' || market.broker === 'weltrade' || String(market.id || '').startsWith('mt5:');
+  }
+
+  function getBrokerAccount(market) {
+    return isWeltradeMarket(market)
+      ? (F.mt5.weltradeAccount || F.mt5.accountState)
+      : (F.mt5.derivAccount || F.mt5.accountState);
+  }
 
   let htfChart, ltfChart, eqChart;
 
@@ -130,27 +145,30 @@
     };
   }
 
-  /* ---------------- Full MT5 Auto-Trading & X1/X2/X3 Trailing Dispatcher ---------------- */
+  /* ---------------- Full MT5 Auto-Trading & X1/X2/X3 Trailing Dispatcher (Deriv #32398784 & Weltrade #43374418) ---------------- */
   async function dispatchMt5Order(market, setup, activeLvls, pos, mode = 'AUTO') {
     if (!market || !setup || !activeLvls) return false;
+    const isWt = isWeltradeMarket(market);
+    const brokerName = isWt ? 'WELTRADE MT5 (#43374418)' : 'DERIV MT5 (#32398784)';
+    const brokerAcc  = getBrokerAccount(market);
 
     // Strict Pure A+ Gate: Never execute regular (Grade A/B/C) setups
     if (setup.grade !== 'A+') {
       if (mode === 'MANUAL') {
-        toast(`<b>⛔ BLOCKED REGULAR TRADE (${setup.grade || 'C'}):</b> Only Pure <b>A+</b> (7/7 confluence) SMC setups are permitted on MT5.`);
+        toast(`<b>⛔ BLOCKED REGULAR TRADE (${setup.grade || 'C'}):</b> Only Pure <b>A+</b> (7/7 confluence) SMC setups are permitted on ${brokerName}.`);
       }
       return false;
     }
 
-    // Institutional Portfolio & Account Risk Guard
-    const riskCheck = ML.evaluatePortfolioRisk(market, pos, F.mt5.accountState, {
+    // Institutional Portfolio & Account Risk Guard (Per-Broker Account)
+    const riskCheck = ML.evaluatePortfolioRisk(market, pos, brokerAcc, {
       maxOpenTrades: state.maxOpenTrades,
       maxRiskPerTradePct: state.maxRiskPerTradePct,
       maxDailyDrawdownPct: state.maxDailyDrawdownPct
     });
     if (!riskCheck.allowed) {
       if (mode === 'MANUAL') {
-        toast(`<b>🛡 MT5 RISK GUARD BLOCKED:</b> ${riskCheck.reason}`);
+        toast(`<b>🛡 ${brokerName} RISK GUARD BLOCKED:</b> ${riskCheck.reason}`);
       }
       return false;
     }
@@ -165,6 +183,7 @@
 
     const ok = await F.mt5.sendCommand({
       id: cmdId,
+      broker: isWt ? 'weltrade' : 'deriv',
       action: 'PLACE_LIMIT',
       symbol: mt5Sym,
       side,
@@ -179,7 +198,7 @@
     const dec = F.decimalsFor(state.series?.ltf || []);
     const f = v => v != null && isFinite(v) ? v.toFixed(dec) : '—';
     toast(
-      `<b>⚡ MT5 PURE A+ ${mode} ORDER SENT: ${mt5Sym}</b>` +
+      `<b>⚡ ${brokerName} PURE A+ ${mode} ORDER SENT: ${mt5Sym}</b>` +
       `<div class="small muted" style="margin-top:3px;">${side} ${pos.lotFormatted} lot @ ${f(activeLvls.entry)} · SL ${f(activeLvls.sl)} (-$${pos.actualRiskUsd.toFixed(2)} / ${pos.actualRiskPct}%) · TP ${f(activeLvls.tp2)}</div>`
     );
     return ok;
@@ -192,12 +211,14 @@
     if (state.trailedLevels.has(key)) return;
     state.trailedLevels.set(key, latestTrail.price);
 
+    const isWt = isWeltradeMarket(market);
     const mt5Sym = market.mt5Symbol || market.name;
     // Check if there is a live MT5 position on this symbol
     const matchingPos = (state.mt5Orders || []).find(o => o.kind === 'POSITION' && (o.symbol === mt5Sym || o.symbol === market.id));
     if (matchingPos) {
       await F.mt5.sendCommand({
         id: `TRAIL-${Date.now()}`,
+        broker: isWt ? 'weltrade' : 'deriv',
         action: 'MODIFY_SLTP',
         symbol: mt5Sym,
         side: matchingPos.side,
@@ -208,7 +229,7 @@
         ticket: matchingPos.ticket,
         comment: `Trail_${latestTrail.label}`
       });
-      toast(`<b>🛡 MT5 AUTO-TRAIL (${latestTrail.label}):</b> Moved SL on #${matchingPos.ticket} (${mt5Sym}) to ${latestTrail.price} (Risk-Free Ch. 7)`);
+      toast(`<b>🛡 ${isWt ? 'WELTRADE' : 'DERIV'} MT5 AUTO-TRAIL (${latestTrail.label}):</b> Moved SL on #${matchingPos.ticket} (${mt5Sym}) to ${latestTrail.price} (Risk-Free Ch. 7)`);
     }
   }
 
@@ -219,7 +240,8 @@
     if (!setup || !mlPred?.isPure) return;
     if (setup.entry == null || setup.sl == null || setup.tp1 == null) return;
 
-    const liveEq = F.mt5.accountState?.equity || F.mt5.accountState?.balance || state.balance;
+    const brokerAcc = getBrokerAccount(market);
+    const liveEq = brokerAcc?.equity || brokerAcc?.balance || state.balance;
     const pos = ML.calcPositionForAccount(market, setup.entry, setup.sl, setup.tp1, setup.tp2, liveEq, state.riskPct);
 
     // STRICT AUTO-EXECUTION: Only dispatch when mlPred.isLiveSignal === true (Pure A+, 7/7 checks, fresh trigger <= 3 bars, inside OB entry window)
@@ -615,15 +637,31 @@
     }
   }
 
-  /* ---------------- Watchlist Sidebar ---------------- */
+  /* ---------------- Watchlist Sidebar (Supports Deriv Charts & Weltrade Charts Modes) ---------------- */
   function renderWatchlist() {
     const body = document.getElementById('wlBody');
     const q = (document.getElementById('wlSearch')?.value || '').trim().toLowerCase();
+    const banner = document.getElementById('wlBrokerBanner');
+    const bannerTitle = document.getElementById('wlBrokerTitle');
+    if (banner && bannerTitle) {
+      if (state.chartBrokerMode === 'weltrade') {
+        bannerTitle.textContent = 'WELTRADE MT5 CHARTS (#43374418)';
+        banner.style.background = 'rgba(8,153,129,0.16)';
+        banner.style.borderColor = 'rgba(8,153,129,0.45)';
+      } else {
+        bannerTitle.textContent = 'DERIV MT5 CHARTS (#32398784)';
+        banner.style.background = 'rgba(41,98,255,0.14)';
+        banner.style.borderColor = 'rgba(41,98,255,0.35)';
+      }
+    }
     if (!body) return;
 
     const groups = new Map();
     let totalShown = 0;
     for (const m of F.markets.values()) {
+      const isWt = isWeltradeMarket(m);
+      if (state.chartBrokerMode === 'weltrade' && !isWt) continue;
+      if (state.chartBrokerMode === 'deriv' && isWt) continue;
       if (state.wlCategory !== 'all' && m.cat !== state.wlCategory) continue;
       if (q && !m.name.toLowerCase().includes(q) && !m.id.toLowerCase().includes(q) && !m.group.toLowerCase().includes(q)) continue;
       const ws = state.watchStates.get(m.id);
@@ -1006,17 +1044,21 @@
         ${setup.kod ? `<div class="lvl"><span>Ch. 8 CBS Breakout Price</span><span>${f(setup.kod.price)}</span></div>` : ''}
       `;
 
-      const liveEq = F.mt5.accountState?.equity || F.mt5.accountState?.balance || state.balance;
+      const acc = getBrokerAccount(market);
+      const isWt = isWeltradeMarket(market);
+      const liveEq = acc?.equity || acc?.balance || state.balance;
       const pos = ML.calcPositionForAccount(market, activeLvls.entry, activeLvls.sl, activeLvls.tp1, activeLvls.tp2, liveEq, state.riskPct);
-      const acc = F.mt5.accountState;
       const riskCheck = ML.evaluatePortfolioRisk(market, pos, acc, {
         maxOpenTrades: state.maxOpenTrades,
         maxRiskPerTradePct: state.maxRiskPerTradePct,
         maxDailyDrawdownPct: state.maxDailyDrawdownPct
       });
       const isPureAPlus = setup.grade === 'A+' && mlPred.isPure;
+      const brokerLabel = isWt
+        ? `#${acc?.login || '43374418'} (${acc?.server || 'Weltrade-Demo'})`
+        : `#${acc?.login || '32398784'} (${acc?.server || 'Deriv-Demo'})`;
       const openOrdersHtml = acc && Array.isArray(acc.orders) && acc.orders.length
-        ? `<div style="margin-top:4px; padding-top:4px; border-top:1px solid var(--border); color:#26a69a;"><b>Active MT5 Positions (${acc.orders.length}/${state.maxOpenTrades}):</b> ` +
+        ? `<div style="margin-top:4px; padding-top:4px; border-top:1px solid var(--border); color:#26a69a;"><b>Active ${isWt ? 'Weltrade' : 'Deriv'} Positions (${acc.orders.length}/${state.maxOpenTrades}):</b> ` +
           acc.orders.map(o => `#${o.ticket} ${o.symbol} ${o.side} ${o.lot} lot (${o.profit >= 0 ? '+' : ''}$${Number(o.profit).toFixed(2)})`).join(' · ') + `</div>`
         : '';
       if (riskBadge && riskDetails && riskBox) {
@@ -1026,7 +1068,7 @@
         riskBadge.className = `st-pill ${isPureAPlus && riskCheck.allowed ? 'st-live' : 'st-bad'}`;
         riskBox.style.borderLeftColor = (isPureAPlus && riskCheck.allowed) ? 'var(--good)' : 'var(--bad)';
         riskDetails.innerHTML = `
-          <div>MT5 Account: <b>#${acc?.login || '32398784'} (${acc?.server || 'Deriv-Demo'})</b> · Equity: <b>$${liveEq.toFixed(2)}</b></div>
+          <div>${isWt ? 'Weltrade' : 'Deriv'} MT5: <b>${brokerLabel}</b> · Equity: <b>$${liveEq.toFixed(2)}</b></div>
           <div>Auto-Gate: <b style="color:${isPureAPlus ? '#26a69a' : '#f23645'};">${isPureAPlus ? 'PURE A+ VERIFIED (7/7 Rules)' : `REGULAR SETUP BLOCKED (Grade ${setup.grade || 'C'} — Needs A+)`}</b></div>
           <div>Risk Sizing (${state.riskPct}%): <b style="color:#38bdf8; font-size:12px;">${pos.lotFormatted} lot</b> · Risk: <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></div>
           <div style="color:#d1d4dc; margin-top:2px;">🛡 ${riskCheck.reason}</div>
@@ -1107,11 +1149,125 @@
     });
   }
 
-  /* ---------------- Render Signals View, MT5 Auto-Orders & Compounding ---------------- */
+  /* ---------------- Render Separated Deriv Signals & Weltrade Signals + MT5 Auto-Orders ---------------- */
+  function renderSignalCardsInto(gridEl, list, brokerTag) {
+    if (!gridEl) return;
+    if (!list.length) {
+      gridEl.innerHTML = `
+        <div class="card" style="grid-column: 1 / -1; text-align:center; padding:18px; background:var(--bg-0);">
+          <h3 style="font-size:12.5px; margin-bottom:4px; color:#fff;">Scanning ${brokerTag === 'weltrade' ? 'Weltrade SyntX (#43374418)' : 'Deriv Synthetics (#32398784)'} for Pure A+ SMC Setups…</h3>
+          <p class="muted small">Requires 7/7 Confluence: HTF BOS/CHoCH (body close) + Valid OB (Sweep + FVG) + Premium/Discount + Inducement Sweep + LTF Adv CHoCH + R:R &ge; 2.5R.</p>
+        </div>
+      `;
+      return;
+    }
+
+    gridEl.innerHTML = list.map(item => {
+      const { market, setup, ml, decimals, price } = item;
+      const isWt = isWeltradeMarket(market);
+      const brokerAcc = getBrokerAccount(market);
+      const liveEq = brokerAcc?.equity || brokerAcc?.balance || state.balance;
+      const f = v => v != null && isFinite(v) ? v.toFixed(decimals || 2) : '—';
+      const stInfo = E.STATE_INFO[setup.state] || { label: setup.state, tone: 'good' };
+      const pos = ML.calcPositionForAccount(market, setup.entry, setup.sl, setup.tp1, setup.tp2, liveEq, state.riskPct);
+      const kl = setup.keyLevels && setup.keyLevels.length ? setup.keyLevels.map(k => k.type).join(' + ') : 'OB + FVG';
+      const lvls = {
+        label: setup.cbsIdx >= 0 ? 'Ch. 8 CBS Limit' : 'Ch. 7 LTF OB Limit',
+        entry: setup.entry,
+        sl: setup.sl,
+        tp1: setup.tp1,
+        tp2: setup.tp2,
+        rr1: setup.rr1,
+        rr2: setup.rr2
+      };
+
+      return `
+        <div class="sig-card pure-aplus">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+              <div style="font-weight:700; font-size:13px; color:#fff;">${market.name}</div>
+              <div class="small muted">${isWt ? 'WELTRADE MT5 (#43374418)' : 'DERIV MT5 (#32398784)'} · ${F.TF_PAIRS[state.pairKey].label} · Spot ${f(price)}</div>
+            </div>
+            <div style="text-align:right;">
+              <span class="st-pill st-${stInfo.tone}">${stInfo.label}</span>
+              <div class="mono small" style="color:#26a69a; font-weight:600; margin-top:2px;">PURE ${setup.grade} · ${ml.probTP1}%</div>
+            </div>
+          </div>
+
+          <div class="pos-visualizer" style="margin-bottom:0;">
+            ${renderBlueRedHtml(setup, lvls, decimals || 2)}
+          </div>
+
+          <div class="card" style="padding:6px 8px; background:var(--bg-0); font-family:var(--font-mono); font-size:11px;">
+            <div style="display:flex; justify-content:space-between;">
+              <span>${isWt ? 'Weltrade' : 'Deriv'} Lot: <b style="color:#38bdf8;">${pos.lotFormatted} lot</b></span>
+              <span>Risk (${state.riskPct}%): <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></span>
+            </div>
+            <div class="small muted" style="margin-top:2px;">${pos.splitInstruction}</div>
+          </div>
+
+          <div class="small muted" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+            <div>Confluence: <b style="color:var(--text);">${kl}</b></div>
+            <div>Liquidity: <b style="color:var(--text);">${setup.liqModel?.type || 'IDM'} Swept</b></div>
+            <div>TP1 Gain: <b class="mono" style="color:#fbbf24;">+$${pos.tp1ProfitUsd.toFixed(2)}</b></div>
+            <div>TP2 Gain: <b class="mono" style="color:#26a69a;">+$${pos.tp2TotalProfitUsd.toFixed(2)}</b></div>
+          </div>
+
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn primary small" style="flex:1;" data-opensig="${market.id}" data-fullzoom="0">
+              📈 Inspect Markings
+            </button>
+            <button class="btn ghost small" style="flex:1; border-color:#38bdf8; color:#38bdf8;" data-opensig="${market.id}" data-fullzoom="1">
+              ⛶ Full-Screen Zoom
+            </button>
+            <button class="btn ghost small" style="flex:1; border-color:#26a69a; color:#26a69a;" data-execsig="${market.id}">
+              ⚡ Execute on ${isWt ? 'Weltrade' : 'Deriv'} MT5
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    gridEl.querySelectorAll('[data-opensig]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mid = btn.dataset.opensig;
+        const fullZoom = btn.dataset.fullzoom === '1';
+        const m = F.markets.get(mid);
+        const isWt = isWeltradeMarket(m);
+        const targetTab = document.querySelector(`[data-view="${isWt ? 'weltrade-charts' : 'deriv-charts'}"]`);
+        if (targetTab) targetTab.click();
+        selectMarket(mid).then(() => {
+          setTimeout(() => {
+            applyChartAnnotations(true);
+            if (fullZoom) toggleWorkspaceFullscreen(true);
+          }, 150);
+        });
+      });
+    });
+
+    gridEl.querySelectorAll('[data-execsig]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mid = btn.dataset.execsig;
+        const ws = state.watchStates.get(mid);
+        if (ws && ws.setup) {
+          const brokerAcc = getBrokerAccount(ws.market);
+          const liveEq = brokerAcc?.equity || brokerAcc?.balance || state.balance;
+          const pos = ML.calcPositionForAccount(ws.market, ws.setup.entry, ws.setup.sl, ws.setup.tp1, ws.setup.tp2, liveEq, state.riskPct);
+          dispatchMt5Order(ws.market, ws.setup, ws.setup, pos, 'MANUAL');
+        }
+      });
+    });
+  }
+
   function renderPureSignalsPage() {
-    const grid = document.getElementById('pureSignalsGrid');
-    const countBadge = document.getElementById('pureSigCount');
-    const activeCountSub = document.getElementById('activeSignalsCount');
+    const derivGrid = document.getElementById('derivSignalsGrid');
+    const wtGrid = document.getElementById('weltradeSignalsGrid');
+    const derivSec = document.getElementById('derivSignalsSection');
+    const wtSec = document.getElementById('weltradeSignalsSection');
+    const derivBadge = document.getElementById('derivSigCount');
+    const wtBadge = document.getElementById('weltradeSigCount');
+    const derivSub = document.getElementById('derivSignalsSub');
+    const wtSub = document.getElementById('weltradeSignalsSub');
     const ledgerTable = document.querySelector('#permanentLedgerTable tbody');
     const ledgerCountSub = document.getElementById('ledgerCountSummary');
     const kpisEl = document.getElementById('signalsKpis');
@@ -1119,128 +1275,50 @@
     const weeklyTable = document.querySelector('#weeklyCompoundingTable tbody');
 
     const stats = getLedgerStats();
-    const acc = F.mt5.accountState;
-    if (acc && acc.login > 0 && acc.balance > 0) {
-      state.balance = +acc.balance;
-      stats.currentBalance = +acc.equity || +acc.balance;
+    const derivAcc = F.mt5.derivAccount || F.mt5.accountState;
+    const wtAcc = F.mt5.weltradeAccount;
+    if (derivAcc && derivAcc.balance > 0) {
+      state.balance = +derivAcc.balance;
+      stats.currentBalance = +derivAcc.equity || +derivAcc.balance;
     }
     const proj = ML.computeWeeklyProjection(state.balance, state.riskPct, stats);
 
     if (kpisEl) {
-      const openPosCount = acc && Array.isArray(acc.orders) ? acc.orders.length : 0;
-      const openFloating = acc && Array.isArray(acc.orders)
-        ? acc.orders.reduce((s, o) => s + (+o.profit || 0), 0)
-        : 0;
+      const dOrders = Array.isArray(derivAcc?.orders) ? derivAcc.orders : [];
+      const wOrders = Array.isArray(wtAcc?.orders) ? wtAcc.orders : [];
+      const dFloat = dOrders.reduce((s, o) => s + (+o.profit || 0), 0);
+      const wFloat = wOrders.reduce((s, o) => s + (+o.profit || 0), 0);
       kpisEl.innerHTML = `
-        <div class="kpi"><div class="kpi-lbl">MT5 Account #${acc?.login || '32398784'} (${acc?.server || 'Deriv-Demo'})</div><div class="kpi-val" style="color:#38bdf8;">$${stats.currentBalance.toFixed(2)}</div></div>
-        <div class="kpi"><div class="kpi-lbl">Live MT5 Positions (${openPosCount})</div><div class="kpi-val" style="color:${openFloating >= 0 ? '#26a69a' : '#f23645'};">${openFloating >= 0 ? '+' : ''}$${openFloating.toFixed(2)}</div></div>
-        <div class="kpi"><div class="kpi-lbl">SMC Win Rate</div><div class="kpi-val" style="color:#26a69a;">${stats.winRate}% (${stats.wins}/${stats.total})</div></div>
-        <div class="kpi"><div class="kpi-lbl">Est. Weekly Return</div><div class="kpi-val" style="color:#fbbf24;">+$${proj.weeklyUsdThisWeek.toFixed(2)} (+${proj.weeklyReturnPct}%)</div></div>
-        <div class="kpi"><div class="kpi-lbl">Auto-Trading Mode</div><div class="kpi-val" style="color:${state.autoTradeEnabled ? '#26a69a' : '#fbbf24'};">${state.autoTradeEnabled ? 'FULL AUTO' : 'MANUAL'}</div></div>
-        <div class="kpi"><div class="kpi-lbl">MT5 Bridge Orders</div><div class="kpi-val">${state.dispatchedCmdIds.size + openPosCount}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Deriv MT5 #${derivAcc?.login || '32398784'} (Deriv-Demo)</div><div class="kpi-val" style="color:#38bdf8;">$${Number(derivAcc?.equity || 9363.81).toFixed(2)}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Deriv Open Positions (${dOrders.length})</div><div class="kpi-val" style="color:${dFloat >= 0 ? '#26a69a' : '#f23645'};">${dFloat >= 0 ? '+' : ''}$${dFloat.toFixed(2)}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Weltrade MT5 #${wtAcc?.login || '43374418'} (Weltrade-Demo)</div><div class="kpi-val" style="color:#26a69a;">$${Number(wtAcc?.equity || 9366.36).toFixed(2)}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Weltrade Open Positions (${wOrders.length})</div><div class="kpi-val" style="color:${wFloat >= 0 ? '#26a69a' : '#f23645'};">${wFloat >= 0 ? '+' : ''}$${wFloat.toFixed(2)}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Pure A+ Gate &amp; Risk</div><div class="kpi-val" style="color:#fbbf24;">${state.riskPct}% Risk · Max ${state.maxOpenTrades}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Auto-Trading Status</div><div class="kpi-val" style="color:${state.autoTradeEnabled ? '#26a69a' : '#fbbf24'};">${state.autoTradeEnabled ? 'PURE A+ AUTO' : 'MANUAL'}</div></div>
       `;
     }
 
-    const activeLiveSignals = [];
+    const derivSignals = [];
+    const weltradeSignals = [];
     for (const [mid, ws] of state.watchStates.entries()) {
-      if (ws?.setup && ws?.ml?.isLiveSignal) {
-        activeLiveSignals.push({ mid, ...ws });
+      if (ws?.setup && ws?.ml?.isPure) {
+        if (isWeltradeMarket(ws.market)) weltradeSignals.push({ mid, ...ws });
+        else derivSignals.push({ mid, ...ws });
       }
     }
-    activeLiveSignals.sort((a, b) => (b.ml.probTP1 - a.ml.probTP1));
+    derivSignals.sort((a, b) => (b.ml.probTP1 - a.ml.probTP1));
+    weltradeSignals.sort((a, b) => (b.ml.probTP1 - a.ml.probTP1));
 
-    if (countBadge) countBadge.textContent = String(activeLiveSignals.length);
-    if (activeCountSub) activeCountSub.textContent = `${activeLiveSignals.length} high-probability SMC Order Block setup(s) active`;
+    if (derivBadge) derivBadge.textContent = String(derivSignals.length);
+    if (wtBadge) wtBadge.textContent = String(weltradeSignals.length);
+    if (derivSub) derivSub.textContent = `${derivSignals.length} Pure A+ Deriv setup(s) active`;
+    if (wtSub) wtSub.textContent = `${weltradeSignals.length} Pure A+ Weltrade SyntX setup(s) active`;
 
-    if (grid) {
-      if (!activeLiveSignals.length) {
-        grid.innerHTML = `
-          <div class="card" style="grid-column: 1 / -1; text-align:center; padding:24px;">
-            <h3 style="font-size:13px; margin-bottom:5px; color:#fff;">Scanning All Deriv &amp; Weltrade Synthetics for Valid SMC Order Blocks…</h3>
-            <p class="muted small">Requires HTF BOS/CHoCH (body close) + Inducement Sweep + Unmitigated Discount/Premium Order Block + LTF Advanced CHoCH.</p>
-          </div>
-        `;
-      } else {
-        grid.innerHTML = activeLiveSignals.map(item => {
-          const { market, setup, ml, decimals, price } = item;
-          const f = v => v != null && isFinite(v) ? v.toFixed(decimals || 2) : '—';
-          const stInfo = E.STATE_INFO[setup.state] || { label: setup.state, tone: 'good' };
-          const pos = ML.calcPositionForAccount(market, setup.entry, setup.sl, setup.tp1, setup.tp2, state.balance, state.riskPct);
-          const kl = setup.keyLevels && setup.keyLevels.length ? setup.keyLevels.map(k => k.type).join(' + ') : 'OB + FVG';
-          const lvls = {
-            label: setup.cbsIdx >= 0 ? 'Ch. 8 CBS Limit' : 'Ch. 7 LTF OB Limit',
-            entry: setup.entry,
-            sl: setup.sl,
-            tp1: setup.tp1,
-            tp2: setup.tp2,
-            rr1: setup.rr1,
-            rr2: setup.rr2
-          };
+    if (derivSec) derivSec.style.display = (state.signalBrokerFilter === 'weltrade') ? 'none' : 'block';
+    if (wtSec) wtSec.style.display = (state.signalBrokerFilter === 'deriv') ? 'none' : 'block';
 
-          return `
-            <div class="sig-card pure-aplus">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                <div>
-                  <div style="font-weight:700; font-size:13px; color:#fff;">${market.name}</div>
-                  <div class="small muted">${market.group} · ${F.TF_PAIRS[state.pairKey].label} · Spot ${f(price)}</div>
-                </div>
-                <div style="text-align:right;">
-                  <span class="st-pill st-${stInfo.tone}">${stInfo.label}</span>
-                  <div class="mono small" style="color:#26a69a; font-weight:600; margin-top:2px;">Grade ${setup.grade} · ${ml.probTP1}%</div>
-                </div>
-              </div>
-
-              <div class="pos-visualizer" style="margin-bottom:0;">
-                ${renderBlueRedHtml(setup, lvls, decimals || 2)}
-              </div>
-
-              <div class="card" style="padding:6px 8px; background:var(--bg-0); font-family:var(--font-mono); font-size:11px;">
-                <div style="display:flex; justify-content:space-between;">
-                  <span>MT5 Lot: <b style="color:#38bdf8;">${pos.lotFormatted} lot</b></span>
-                  <span>Risk: <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></span>
-                </div>
-                <div class="small muted" style="margin-top:2px;">${pos.splitInstruction}</div>
-              </div>
-
-              <div class="small muted" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
-                <div>Confluence: <b style="color:var(--text);">${kl}</b></div>
-                <div>Liquidity: <b style="color:var(--text);">${setup.liqModel?.type || 'IDM'} Swept</b></div>
-                <div>TP1 Gain: <b class="mono" style="color:#fbbf24;">+$${pos.tp1ProfitUsd.toFixed(2)}</b></div>
-                <div>TP2 Gain: <b class="mono" style="color:#26a69a;">+$${pos.tp2TotalProfitUsd.toFixed(2)}</b></div>
-              </div>
-
-              <div style="display:flex; gap:6px;">
-                <button class="btn primary" style="flex:1;" data-opensig="${market.id}">
-                  Inspect Chart
-                </button>
-                <button class="btn ghost" style="flex:1; border-color:#26a69a; color:#26a69a;" data-execsig="${market.id}">
-                  ⚡ Send to MT5 Now
-                </button>
-              </div>
-            </div>
-          `;
-        }).join('');
-
-        grid.querySelectorAll('[data-opensig]').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const mid = btn.dataset.opensig;
-            document.querySelector('[data-view="terminal"]').click();
-            selectMarket(mid);
-          });
-        });
-
-        grid.querySelectorAll('[data-execsig]').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const mid = btn.dataset.opensig || btn.dataset.execsig;
-            const ws = state.watchStates.get(mid);
-            if (ws && ws.setup) {
-              const pos = ML.calcPositionForAccount(ws.market, ws.setup.entry, ws.setup.sl, ws.setup.tp1, ws.setup.tp2, state.balance, state.riskPct);
-              dispatchMt5Order(ws.market, ws.setup, ws.setup, pos, 'MANUAL');
-            }
-          });
-        });
-      }
-    }
+    renderSignalCardsInto(derivGrid, derivSignals, 'deriv');
+    renderSignalCardsInto(wtGrid, weltradeSignals, 'weltrade');
 
     if (ledgerCountSub) ledgerCountSub.textContent = `${state.permanentTrades.length} SMC trades permanently logged`;
     if (ledgerTable) {
@@ -1411,10 +1489,43 @@
   }
 
   function selectMarket(id) {
-    if (!F.markets.has(id)) return;
+    if (!F.markets.has(id)) return Promise.resolve();
+    const m = F.markets.get(id);
+    if (isWeltradeMarket(m)) state.lastWeltradeMarketId = id;
+    else state.lastDerivMarketId = id;
     state.marketId = id;
     state.lastPrice = null;
-    loadActiveMarket();
+    return loadActiveMarket();
+  }
+
+  function toggleWorkspaceFullscreen(forceState) {
+    const centerEl = document.getElementById('chartCenterSection');
+    const fsBtn = document.getElementById('fullScreenChartBtn');
+    if (!centerEl) return;
+    const isNow = typeof forceState === 'boolean'
+      ? forceState
+      : !centerEl.classList.contains('fullscreen-workspace');
+    centerEl.classList.toggle('fullscreen-workspace', isNow);
+    if (fsBtn) {
+      fsBtn.textContent = isNow ? '✕ Exit Full Screen' : '⛶ Full Screen Zoom';
+    }
+    setTimeout(() => {
+      if (htfChart) htfChart.requestDraw();
+      if (ltfChart) ltfChart.requestDraw();
+    }, 60);
+  }
+
+  function togglePaneFullscreen(cardId, btnId, defaultLabel) {
+    const card = document.getElementById(cardId);
+    const btn = document.getElementById(btnId);
+    if (!card) return;
+    const isNow = !card.classList.contains('fullscreen-pane');
+    card.classList.toggle('fullscreen-pane', isNow);
+    if (btn) btn.textContent = isNow ? '✕ Exit Full' : defaultLabel;
+    setTimeout(() => {
+      if (htfChart) htfChart.requestDraw();
+      if (ltfChart) ltfChart.requestDraw();
+    }, 60);
   }
 
   /* ---------------- Deep Quant Model Calibration ---------------- */
@@ -1763,17 +1874,81 @@
     document.getElementById('reloadBtn').addEventListener('click', () => loadActiveMarket());
     document.getElementById('trainMlBtn')?.addEventListener('click', deepTrainActivePair);
     document.getElementById('scanPureSignalsBtn')?.addEventListener('click', () => {
-      toast('Scanning Deriv & Weltrade Synthetics for valid SMC setups…');
+      toast('Scanning Deriv (#32398784) & Weltrade (#43374418) for Pure A+ SMC setups…');
       scanWatchlistOnce();
     });
     document.getElementById('wlSearch').addEventListener('input', renderWatchlist);
 
+    // Zoom & Full-Screen Controls for Deriv & Weltrade Charts
+    document.getElementById('zoomInBtn')?.addEventListener('click', () => {
+      if (htfChart) htfChart.zoomIn();
+      if (ltfChart) ltfChart.zoomIn();
+    });
+    document.getElementById('zoomOutBtn')?.addEventListener('click', () => {
+      if (htfChart) htfChart.zoomOut();
+      if (ltfChart) ltfChart.zoomOut();
+    });
+    document.getElementById('htfZoomInBtn')?.addEventListener('click', () => htfChart?.zoomIn());
+    document.getElementById('htfZoomOutBtn')?.addEventListener('click', () => htfChart?.zoomOut());
+    document.getElementById('ltfZoomInBtn')?.addEventListener('click', () => ltfChart?.zoomIn());
+    document.getElementById('ltfZoomOutBtn')?.addEventListener('click', () => ltfChart?.zoomOut());
+    document.getElementById('fullScreenChartBtn')?.addEventListener('click', () => toggleWorkspaceFullscreen());
+    document.getElementById('htfFullBtn')?.addEventListener('click', () => togglePaneFullscreen('htfCard', 'htfFullBtn', '⛶ Full HTF'));
+    document.getElementById('ltfFullBtn')?.addEventListener('click', () => togglePaneFullscreen('ltfCard', 'ltfFullBtn', '⛶ Full LTF'));
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        toggleWorkspaceFullscreen(false);
+        const hc = document.getElementById('htfCard');
+        const lc = document.getElementById('ltfCard');
+        if (hc?.classList.contains('fullscreen-pane')) togglePaneFullscreen('htfCard', 'htfFullBtn', '⛶ Full HTF');
+        if (lc?.classList.contains('fullscreen-pane')) togglePaneFullscreen('ltfCard', 'ltfFullBtn', '⛶ Full LTF');
+      }
+    });
+
+    document.querySelectorAll('#sigBrokerFilterSeg button').forEach(b => {
+      b.addEventListener('click', () => {
+        state.signalBrokerFilter = b.dataset.sbroker || 'all';
+        document.querySelectorAll('#sigBrokerFilterSeg button').forEach(x => x.classList.toggle('active', x === b));
+        renderPureSignalsPage();
+      });
+    });
+
     document.querySelectorAll('.vt').forEach(b => {
       b.addEventListener('click', () => {
+        const vName = b.dataset.view;
         document.querySelectorAll('.vt').forEach(x => x.classList.toggle('active', x === b));
-        document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${b.dataset.view}`));
-        if (b.dataset.view === 'terminal') setTimeout(() => { htfChart.requestDraw(); ltfChart.requestDraw(); }, 40);
-        if (b.dataset.view === 'signals') renderPureSignalsPage();
+
+        if (vName === 'deriv-charts' || vName === 'weltrade-charts' || vName === 'terminal') {
+          document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-terminal'));
+          if (vName === 'weltrade-charts') {
+            state.chartBrokerMode = 'weltrade';
+            state.wlCategory = 'weltrade';
+            document.querySelectorAll('#wlCats button').forEach(x => x.classList.toggle('active', x.dataset.cat === 'weltrade'));
+            renderWatchlist();
+            if (!isWeltradeMarket(F.markets.get(state.marketId))) {
+              selectMarket(state.lastWeltradeMarketId || 'mt5:FX Vol 20');
+            }
+          } else {
+            state.chartBrokerMode = 'deriv';
+            if (state.wlCategory === 'weltrade') state.wlCategory = 'all';
+            document.querySelectorAll('#wlCats button').forEach(x => x.classList.toggle('active', x.dataset.cat === state.wlCategory));
+            renderWatchlist();
+            if (isWeltradeMarket(F.markets.get(state.marketId))) {
+              selectMarket(state.lastDerivMarketId || '1HZ15V');
+            }
+          }
+          setTimeout(() => { htfChart.requestDraw(); ltfChart.requestDraw(); }, 50);
+        } else if (vName === 'deriv-signals' || vName === 'weltrade-signals' || vName === 'signals') {
+          document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-signals'));
+          state.signalBrokerFilter = vName === 'weltrade-signals' ? 'weltrade' : (vName === 'deriv-signals' ? 'deriv' : 'all');
+          document.querySelectorAll('#sigBrokerFilterSeg button').forEach(x => {
+            x.classList.toggle('active', x.dataset.sbroker === state.signalBrokerFilter);
+          });
+          renderPureSignalsPage();
+        } else {
+          document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${vName}`));
+        }
       });
     });
 

@@ -286,6 +286,30 @@
       this.requestDraw();
     }
 
+    zoom(factor = 0.72) {
+      if (!this.chart || !this.data.length) return;
+      const range = this.chart.timeScale().getVisibleLogicalRange();
+      if (!range) {
+        this.fit(65);
+        return;
+      }
+      const span = Math.max(12, (range.to - range.from) * factor);
+      const center = (range.from + range.to) / 2;
+      this.chart.timeScale().setVisibleLogicalRange({
+        from: center - span * 0.5,
+        to: center + span * 0.5
+      });
+      this.requestDraw();
+    }
+
+    zoomIn() {
+      this.zoom(0.68);
+    }
+
+    zoomOut() {
+      this.zoom(1.42);
+    }
+
     focusTime(ms, barsBefore = 45, barsAfter = 25) {
       if (!this.chart || !this.data.length || !isFinite(ms)) {
         this.fit(85);

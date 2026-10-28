@@ -4,7 +4,7 @@
 //|   Pure A+ Autonomous Execution & Institutional Risk Manager v4.0 |
 //+------------------------------------------------------------------+
 #property copyright "SMC Desk — Frank Miller Smart Money Concepts"
-#property version   "4.00"
+#property version   "4.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -31,6 +31,8 @@ CPositionInfo g_pos;
 
 datetime g_lastLog        = 0;
 datetime g_lastAPlusScan  = 0;
+datetime g_lastCandleSync = 0;
+bool     g_initSyncDone   = false;
 string   g_lastCmdId      = "";
 double   g_dayStartEquity = 0.0;
 int      g_currentDay     = -1;
@@ -614,6 +616,15 @@ bool EvaluateSymbolPureAPlus(const string sym)
    return false;
 }
 
+bool IsWeltradeBroker()
+{
+   string srv = AccountInfoString(ACCOUNT_SERVER);
+   long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   if(login == 43374418 || StringFind(srv, "Weltrade") >= 0 || StringFind(srv, "WELTRADE") >= 0)
+      return true;
+   return false;
+}
+
 //+------------------------------------------------------------------+
 //| Export Live Account & Open Positions / Pending Orders State      |
 //+------------------------------------------------------------------+
@@ -624,6 +635,7 @@ void ExportAccountAndOrders()
    double margin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    long   login  = AccountInfoInteger(ACCOUNT_LOGIN);
    string srv    = AccountInfoString(ACCOUNT_SERVER);
+   string broker = IsWeltradeBroker() ? "weltrade" : "deriv";
 
    string posJson = "[";
    bool firstPos = true;
@@ -648,8 +660,8 @@ void ExportAccountAndOrders()
       if(!firstPos) posJson += ",";
       firstPos = false;
       posJson += StringFormat(
-         "{\"ticket\":%I64u,\"kind\":\"POSITION\",\"symbol\":\"%s\",\"side\":\"%s\",\"lot\":%.3f,\"entry\":%.*f,\"current\":%.*f,\"sl\":%.*f,\"tp\":%.*f,\"profit\":%.2f,\"time\":%I64d,\"comment\":\"%s\"}",
-         ticket, sym, (type == POSITION_TYPE_BUY ? "BUY" : "SELL"),
+         "{\"ticket\":%I64u,\"kind\":\"POSITION\",\"broker\":\"%s\",\"symbol\":\"%s\",\"side\":\"%s\",\"lot\":%.3f,\"entry\":%.*f,\"current\":%.*f,\"sl\":%.*f,\"tp\":%.*f,\"profit\":%.2f,\"time\":%I64d,\"comment\":\"%s\"}",
+         ticket, broker, sym, (type == POSITION_TYPE_BUY ? "BUY" : "SELL"),
          vol, dec, openP, dec, curP, dec, sl, dec, tp, prof, timeO, comm
       );
    }
@@ -676,17 +688,25 @@ void ExportAccountAndOrders()
       if(!firstPos) posJson += ",";
       firstPos = false;
       posJson += StringFormat(
-         "{\"ticket\":%I64u,\"kind\":\"PENDING\",\"symbol\":\"%s\",\"side\":\"%s\",\"lot\":%.3f,\"entry\":%.*f,\"current\":%.*f,\"sl\":%.*f,\"tp\":%.*f,\"profit\":0.00,\"time\":%I64d,\"comment\":\"%s\"}",
-         ticket, sym, sideStr,
+         "{\"ticket\":%I64u,\"kind\":\"PENDING\",\"broker\":\"%s\",\"symbol\":\"%s\",\"side\":\"%s\",\"lot\":%.3f,\"entry\":%.*f,\"current\":%.*f,\"sl\":%.*f,\"tp\":%.*f,\"profit\":0.00,\"time\":%I64d,\"comment\":\"%s\"}",
+         ticket, broker, sym, sideStr,
          vol, dec, openP, dec, curP, dec, sl, dec, tp, timeO, comm
       );
    }
    posJson += "]";
 
    string stateJson = StringFormat(
-      "{\"login\":%I64d,\"server\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"freeMargin\":%.2f,\"updated\":%I64d,\"orders\":%s}",
-      login, srv, bal, eq, margin, (long)TimeCurrent(), posJson
+      "{\"broker\":\"%s\",\"login\":%I64d,\"server\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"freeMargin\":%.2f,\"updated\":%I64d,\"orders\":%s}",
+      broker, login, srv, bal, eq, margin, (long)TimeCurrent(), posJson
    );
+
+   string brokerFile = IsWeltradeBroker() ? "smc_bridge\\account_weltrade.json" : "smc_bridge\\account_deriv.json";
+   int fhB = FileOpen(brokerFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+   if(fhB != INVALID_HANDLE)
+   {
+      FileWriteString(fhB, stateJson);
+      FileClose(fhB);
+   }
 
    int fh = FileOpen("smc_bridge\\account_state.json", FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
    if(fh != INVALID_HANDLE)
@@ -699,11 +719,8 @@ void ExportAccountAndOrders()
 //+------------------------------------------------------------------+
 //| Execute Incoming Web Terminal Pure A+ & Trailing Commands        |
 //+------------------------------------------------------------------+
-void ProcessCommandQueue()
+void ProcessQueueFile(const string cmdPath)
 {
-   if(!InpEnableAutoExe) return;
-
-   string cmdPath = "smc_bridge\\commands_queue.txt";
    if(!FileIsExist(cmdPath, FILE_COMMON)) return;
 
    int fh = FileOpen(cmdPath, FILE_READ | FILE_TXT | FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE);
@@ -778,6 +795,14 @@ void ProcessCommandQueue()
    }
 }
 
+void ProcessCommandQueue()
+{
+   if(!InpEnableAutoExe) return;
+   string brokerQueue = IsWeltradeBroker() ? "smc_bridge\\commands_weltrade.txt" : "smc_bridge\\commands_deriv.txt";
+   ProcessQueueFile(brokerQueue);
+   ProcessQueueFile("smc_bridge\\commands_queue.txt");
+}
+
 //+------------------------------------------------------------------+
 //| Main Timer: Process Commands, Manage Trailing & Stream OHLCV     |
 //+------------------------------------------------------------------+
@@ -786,6 +811,11 @@ void OnTimer()
    ProcessCommandQueue();
    ManageOpenPositionsAndTrailing();
    ExportAccountAndOrders();
+
+   // Throttle heavy 500-bar OHLCV file writes to once every 25 seconds after initial sync
+   if(g_initSyncDone && (TimeCurrent() - g_lastCandleSync < 25))
+      return;
+   g_lastCandleSync = TimeCurrent();
 
    string syms[];
    int n = StringSplit(InpSymbols, ',', syms);
@@ -796,24 +826,51 @@ void OnTimer()
       n = 1;
    }
 
-   int mwTotal = SymbolsTotal(true);
-   for(int m = 0; m < mwTotal; m++)
+   // Discover all symbols on the broker server (including Weltrade SyntX / Deriv Synthetics not yet in Market Watch)
+   int allTotal = SymbolsTotal(false);
+   string catJson = "[";
+   bool firstCat = true;
+   for(int m = 0; m < allTotal; m++)
    {
-      string mws = SymbolName(m, true);
-      if(StringLen(mws) > 0)
+      string sName = SymbolName(m, false);
+      if(StringLen(sName) == 0) continue;
+      string up = sName;
+      StringToUpper(up);
+      bool isTarget = (StringFind(up, "PAIN") >= 0 || StringFind(up, "GAIN") >= 0 ||
+                       StringFind(up, "FLIP") >= 0 || StringFind(up, "SWITCH") >= 0 ||
+                       StringFind(up, "BREAK") >= 0 || StringFind(up, "VOL") >= 0 ||
+                       StringFind(up, "SYNT") >= 0 || StringFind(up, "STEP") >= 0 ||
+                       StringFind(up, "BOOM") >= 0 || StringFind(up, "CRASH") >= 0 ||
+                       StringFind(up, "JUMP") >= 0 || StringFind(up, "DEX") >= 0 ||
+                       StringFind(up, "XAU") >= 0 || up == "EURUSD" || up == "GBPUSD" ||
+                       (bool)SymbolInfoInteger(sName, SYMBOL_SELECT));
+      if(isTarget)
       {
+         SymbolSelect(sName, true);
+         if(!firstCat) catJson += ",";
+         firstCat = false;
+         catJson += "\"" + sName + "\"";
+
          bool exists = false;
          for(int s = 0; s < n; s++)
          {
-            if(syms[s] == mws) { exists = true; break; }
+            if(syms[s] == sName) { exists = true; break; }
          }
          if(!exists)
          {
             ArrayResize(syms, n + 1);
-            syms[n] = mws;
+            syms[n] = sName;
             n++;
          }
       }
+   }
+   catJson += "]";
+   string catFile = IsWeltradeBroker() ? "smc_bridge\\catalog_weltrade.json" : "smc_bridge\\catalog_deriv.json";
+   int fhCat = FileOpen(catFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+   if(fhCat != INVALID_HANDLE)
+   {
+      FileWriteString(fhCat, catJson);
+      FileClose(fhCat);
    }
 
    ENUM_TIMEFRAMES tfs[6] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_H1, PERIOD_H4, PERIOD_D1};
@@ -877,10 +934,13 @@ void OnTimer()
       }
    }
 
+   if(exportedCount >= 6)
+      g_initSyncDone = true;
+
    if(TimeCurrent() - g_lastLog > 30)
    {
       g_lastLog = TimeCurrent();
-      Print("SMC_Auto_Bridge v4.00 (Pure A+ & Risk Guard): Synced ", n, " symbols (", exportedCount, " series). Account #", AccountInfoInteger(ACCOUNT_LOGIN));
+      Print("SMC_Auto_Bridge v4.10 (Pure A+ & Risk Guard): Synced ", n, " symbols (", exportedCount, " series). Account #", AccountInfoInteger(ACCOUNT_LOGIN));
    }
 }
 //+------------------------------------------------------------------+

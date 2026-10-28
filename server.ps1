@@ -138,7 +138,7 @@ while ($listener.IsListening) {
       }
     }
 
-    # 2. MT5 Account & Active Positions / Pending Orders State
+    # 2. MT5 Account & Active Positions / Pending Orders State (Deriv #32398784 + Weltrade #43374418)
     if ($path -eq "/api/mt5/account") {
       if ($req.HttpMethod -eq "POST") {
         $reader = New-Object System.IO.StreamReader($req.InputStream)
@@ -153,13 +153,59 @@ while ($listener.IsListening) {
         $res.OutputStream.Close()
         continue
       } else {
-        $accFile = Join-Path $commonSmcDir "account_state.json"
-        if (Test-Path $accFile) {
-          try {
-            $mt5AccountState = [System.IO.File]::ReadAllText($accFile, [System.Text.Encoding]::UTF8)
-          } catch {}
+        $accDerivFile = Join-Path $commonSmcDir "account_deriv.json"
+        $accWtFile    = Join-Path $commonSmcDir "account_weltrade.json"
+        $accMainFile  = Join-Path $commonSmcDir "account_state.json"
+
+        $derivObj = $null
+        $wtObj    = $null
+        $mainObj  = $null
+
+        if (Test-Path $accDerivFile) {
+          try { $derivObj = [System.IO.File]::ReadAllText($accDerivFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
         }
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($mt5AccountState)
+        if (Test-Path $accWtFile) {
+          try { $wtObj = [System.IO.File]::ReadAllText($accWtFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
+        }
+        if (Test-Path $accMainFile) {
+          try { $mainObj = [System.IO.File]::ReadAllText($accMainFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
+        }
+
+        if (-not $derivObj -and $mainObj -and $mainObj.login -eq 32398784) { $derivObj = $mainObj }
+        if (-not $wtObj -and $mainObj -and $mainObj.login -eq 43374418) { $wtObj = $mainObj }
+
+        $combinedOrders = @()
+        if ($derivObj -and $derivObj.orders) {
+          foreach ($o in $derivObj.orders) {
+            $o | Add-Member -NotePropertyName "broker" -NotePropertyValue "deriv" -Force
+            $combinedOrders += $o
+          }
+        }
+        if ($wtObj -and $wtObj.orders) {
+          foreach ($o in $wtObj.orders) {
+            $o | Add-Member -NotePropertyName "broker" -NotePropertyValue "weltrade" -Force
+            $combinedOrders += $o
+          }
+        }
+
+        $primary = if ($derivObj) { $derivObj } elseif ($wtObj) { $wtObj } elseif ($mainObj) { $mainObj } else {
+          @{ login = 32398784; server = "Deriv-Demo"; balance = 9363.52; equity = 9363.52; freeMargin = 9363.52; updated = 0; orders = @() }
+        }
+
+        $payloadObj = @{
+          login      = $primary.login
+          server     = $primary.server
+          balance    = $primary.balance
+          equity     = $primary.equity
+          freeMargin = $primary.freeMargin
+          updated    = $primary.updated
+          orders     = $combinedOrders
+          deriv      = if ($derivObj) { $derivObj } else { @{ broker = "deriv"; login = 32398784; server = "Deriv-Demo"; balance = 9363.52; equity = 9363.52; freeMargin = 9363.52; updated = 0; orders = @() } }
+          weltrade   = if ($wtObj)    { $wtObj }    else { @{ broker = "weltrade"; login = 43374418; server = "Weltrade-Demo"; balance = 9339.86; equity = 9366.36; freeMargin = 9366.36; updated = 0; orders = @() } }
+        }
+
+        $jsonOut = $payloadObj | ConvertTo-Json -Depth 6 -Compress
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonOut)
         $res.ContentType = "application/json; charset=utf-8"
         $res.OutputStream.Write($bytes, 0, $bytes.Length)
         $res.OutputStream.Close()
@@ -167,7 +213,7 @@ while ($listener.IsListening) {
       }
     }
 
-    # 3. MT5 Command Queue (Place Limit Order, Trail SL X1/X2/X3, Close)
+    # 3. MT5 Command Queue (Routes to Deriv #32398784 or Weltrade #43374418)
     if ($path -eq "/api/mt5/command" -and $req.HttpMethod -eq "POST") {
       $reader = New-Object System.IO.StreamReader($req.InputStream)
       $body = $reader.ReadToEnd()
@@ -184,10 +230,14 @@ while ($listener.IsListening) {
           $sl     = $cmdObj.sl
           $tp     = $cmdObj.tp
           $ticket = if ($cmdObj.ticket) { $cmdObj.ticket } else { 0 }
-          $comm   = if ($cmdObj.comment) { $cmdObj.comment } else { "SMC_Auto" }
+          $comm   = if ($cmdObj.comment) { $cmdObj.comment } else { "SMC_APLUS" }
+          $broker = if ($cmdObj.broker) { $cmdObj.broker.ToLower() } else { "" }
+
+          $isWeltrade = ($broker -eq "weltrade") -or ($sym -match "Pain|Gain|Flip|Switch|BreakX|FX Vol|SFX Vol")
+          $targetQueue = if ($isWeltrade) { "commands_weltrade.txt" } else { "commands_deriv.txt" }
 
           $line = "$cmdId|$action|$sym|$side|$lot|$entry|$sl|$tp|$ticket|$comm`r`n"
-          $cmdFile = Join-Path $commonSmcDir "commands_queue.txt"
+          $cmdFile = Join-Path $commonSmcDir $targetQueue
           [System.IO.File]::AppendAllText($cmdFile, $line, [System.Text.Encoding]::ASCII)
         } catch {}
       }
@@ -246,7 +296,14 @@ while ($listener.IsListening) {
         $u = $mt5Meta[$k].updated
         $items += ('{{"symbol":"{0}","updated":{1}}}' -f $k, $u)
       }
-      $json = '{"symbols":[' + ($items -join ",") + ']}'
+      $wtCat = "[]"
+      $dvCat = "[]"
+      $wtCatFile = Join-Path $commonSmcDir "catalog_weltrade.json"
+      $dvCatFile = Join-Path $commonSmcDir "catalog_deriv.json"
+      if (Test-Path $wtCatFile) { try { $wtCat = [System.IO.File]::ReadAllText($wtCatFile, [System.Text.Encoding]::UTF8) } catch {} }
+      if (Test-Path $dvCatFile) { try { $dvCat = [System.IO.File]::ReadAllText($dvCatFile, [System.Text.Encoding]::UTF8) } catch {} }
+
+      $json = '{"symbols":[' + ($items -join ",") + '],"weltradeCatalog":' + $wtCat + ',"derivCatalog":' + $dvCat + '}'
       $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
       $res.ContentType = "application/json"
       $res.OutputStream.Write($bytes, 0, $bytes.Length)
