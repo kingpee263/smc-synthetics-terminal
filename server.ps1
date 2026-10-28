@@ -154,10 +154,12 @@ while ($listener.IsListening) {
         $hasDerivProc = ($mt5Procs | Where-Object { $_.ExecutablePath -like "*Program Files*MetaTrader 5*" }).Count -gt 0
         $hasWtProc    = ($mt5Procs | Where-Object { $_.ExecutablePath -like "*mt5_weltrade*" }).Count -gt 0
         if (-not $hasDerivProc -and (Test-Path "C:\Program Files\MetaTrader 5\terminal64.exe")) {
-          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '"C:\Program Files\MetaTrader 5\terminal64.exe"' } -ErrorAction SilentlyContinue | Out-Null
+          $derivIni = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\config\deriv_startup.ini"
+          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "`"C:\Program Files\MetaTrader 5\terminal64.exe`" /config:`"$derivIni`"" } -ErrorAction SilentlyContinue | Out-Null
         }
         if (-not $hasWtProc -and (Test-Path "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe")) {
-          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '"C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe"' } -ErrorAction SilentlyContinue | Out-Null
+          $wtIni = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\06ECD6BB937B24BE6A2DF310EF01AEFF\config\weltrade_startup.ini"
+          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "`"C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe`" /config:`"$wtIni`"" } -ErrorAction SilentlyContinue | Out-Null
         }
       }
 

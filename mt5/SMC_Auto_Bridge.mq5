@@ -113,7 +113,7 @@ void InitBrokerSymbols()
    }
    catJson += "]";
    string catFile = IsWeltradeBroker() ? "smc_bridge\\catalog_weltrade.json" : "smc_bridge\\catalog_deriv.json";
-   int fhCat = FileOpen(catFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+   int fhCat = FileOpen(catFile, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(fhCat != INVALID_HANDLE)
    {
       FileWriteString(fhCat, catJson);
@@ -1225,7 +1225,7 @@ void ExportAccountAndOrders()
    );
 
    string brokerFile = IsWeltradeBroker() ? "smc_bridge\\account_weltrade.json" : "smc_bridge\\account_deriv.json";
-   int fhB = FileOpen(brokerFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+   int fhB = FileOpen(brokerFile, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(fhB != INVALID_HANDLE)
    {
       FileWriteString(fhB, stateJson);
@@ -1235,7 +1235,7 @@ void ExportAccountAndOrders()
    if(login > 0)
    {
       string loginFile = "smc_bridge\\account_" + IntegerToString(login) + ".json";
-      int fhL = FileOpen(loginFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+      int fhL = FileOpen(loginFile, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
       if(fhL != INVALID_HANDLE)
       {
          FileWriteString(fhL, stateJson);
@@ -1243,7 +1243,7 @@ void ExportAccountAndOrders()
       }
    }
 
-   int fh = FileOpen("smc_bridge\\account_state.json", FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+   int fh = FileOpen("smc_bridge\\account_state.json", FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(fh != INVALID_HANDLE)
    {
       FileWriteString(fh, stateJson);
@@ -1280,7 +1280,7 @@ void ExportLiveQuotes()
    qJson += "}";
 
    string qFile = IsWeltradeBroker() ? "smc_bridge\\quotes_weltrade.json" : "smc_bridge\\quotes_deriv.json";
-   int fh = FileOpen(qFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+   int fh = FileOpen(qFile, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(fh != INVALID_HANDLE)
    {
       FileWriteString(fh, qJson);
@@ -1342,7 +1342,7 @@ int ExportSymbolTimeframes(const string sym, bool forceWaitIfNeeded)
       json += "]";
 
       string filePath = "smc_bridge\\" + safeSym + "_" + IntegerToString(tfSec[t]) + ".json";
-      int fileHandle = FileOpen(filePath, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+      int fileHandle = FileOpen(filePath, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
       if(fileHandle != INVALID_HANDLE)
       {
          FileWriteString(fileHandle, json);
@@ -1360,7 +1360,7 @@ void ProcessQueueFile(const string cmdPath)
 {
    if(!FileIsExist(cmdPath, FILE_COMMON)) return;
 
-   int fh = FileOpen(cmdPath, FILE_READ | FILE_TXT | FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE);
+   int fh = FileOpen(cmdPath, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(fh == INVALID_HANDLE) return;
 
    string lines[];
@@ -1455,7 +1455,7 @@ string GetActivePrioritySymbol()
    string activeFile = IsWeltradeBroker() ? "smc_bridge\\active_weltrade.txt" : "smc_bridge\\active_deriv.txt";
    if(!FileIsExist(activeFile, FILE_COMMON)) return _Symbol;
 
-   int fh = FileOpen(activeFile, FILE_READ | FILE_TXT | FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE);
+   int fh = FileOpen(activeFile, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
    if(fh == INVALID_HANDLE) return _Symbol;
    string s = FileReadString(fh);
    FileClose(fh);
