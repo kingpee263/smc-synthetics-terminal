@@ -4,7 +4,7 @@
 //|     Deriv Synthetics & Weltrade SyntX Full Auto-Execution Engine |
 //+------------------------------------------------------------------+
 #property copyright "SMC Desk — Frank Miller Smart Money Concepts"
-#property version   "3.00"
+#property version   "3.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -13,7 +13,7 @@
 
 input string InpServerUrl     = "http://localhost:8095"; // Local SMC Desk Server URL
 input string InpSymbols       = "Volatility 75 (1s) Index,Volatility 75 Index,Volatility 100 (1s) Index,Volatility 100 Index,Volatility 50 (1s) Index,Volatility 50 Index,Volatility 25 (1s) Index,Volatility 25 Index,Volatility 15 (1s) Index,Volatility 10 (1s) Index,Volatility 10 Index,Boom 1000 Index,Crash 1000 Index,Boom 500 Index,Crash 500 Index,Boom 300 Index,Crash 300 Index,Step Index,Jump 10 Index,Jump 25 Index,Jump 50 Index,Jump 75 Index,Jump 100 Index,Range Break 100 Index,Range Break 200 Index,DEX 600 UP,DEX 600 DOWN,DEX 900 UP,DEX 900 DOWN,PainX 400,GainX 400,PainX 600,GainX 600,PainX 800,GainX 800,PainX 999,GainX 999,PainX 1200,GainX 1200,FX Vol 20,FX Vol 40,FX Vol 60,FX Vol 80,FX Vol 99,SFX Vol 20,SFX Vol 40,SFX Vol 60,SFX Vol 80,SFX Vol 99,SwitchX 600,BreakX 600,XAUUSD,EURUSD,GBPUSD"; // Monitored Symbols
-input int    InpFullBars      = 600;     // Historical bars on initial sync
+input int    InpFullBars      = 500;     // Historical bars exported every sync
 input long   InpMagicNumber   = 20260401;// Magic Number for SMC Auto-Trades
 input bool   InpEnableAutoExe = true;    // Allow Web Terminal Auto-Trading & Trailing Stops
 
@@ -21,22 +21,21 @@ CTrade        g_trade;
 COrderInfo    g_order;
 CPositionInfo g_pos;
 
-bool     g_initialSent = false;
-datetime g_lastLog     = 0;
-string   g_lastCmdId   = "";
+datetime g_lastLog   = 0;
+string   g_lastCmdId = "";
 
 int OnInit()
 {
    g_trade.SetExpertMagicNumber(InpMagicNumber);
    g_trade.SetDeviationInPoints(30);
    g_trade.SetTypeFilling(ORDER_FILLING_FOK);
-   EventSetTimer(1);
+   EventSetTimer(2);
    Print("=================================================================");
-   Print("SMC_Auto_Bridge v3.00 initialized on Account #", AccountInfoInteger(ACCOUNT_LOGIN),
+   Print("SMC_Auto_Bridge v3.10 initialized on Account #", AccountInfoInteger(ACCOUNT_LOGIN),
          " (", AccountInfoString(ACCOUNT_SERVER), ")");
    Print("Balance: $", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2),
          " | Equity: $", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2));
-   Print("Common Files Path: Common\\Files\\smc_bridge");
+   Print("Common Files Path: Common\\Files\\smc_bridge (Full ", InpFullBars, " bars per TF)");
    Print("=================================================================");
    return(INIT_SUCCEEDED);
 }
@@ -142,16 +141,6 @@ void ExportAccountAndOrders()
       FileWriteString(fh, stateJson);
       FileClose(fh);
    }
-
-   if(StringLen(InpServerUrl) > 5)
-   {
-      string url = InpServerUrl + "/api/mt5/account";
-      char post[], result[];
-      string headers = "Content-Type: application/json\r\n";
-      StringToCharArray(stateJson, post, 0, StringLen(stateJson));
-      string resHeaders;
-      WebRequest("POST", url, headers, 400, post, result, resHeaders);
-   }
 }
 
 //+------------------------------------------------------------------+
@@ -186,8 +175,6 @@ void ProcessCommandQueue()
 
    for(int i = 0; i < count; i++)
    {
-      // Pipe-delimited format:
-      // CMD_ID|ACTION|SYMBOL|SIDE|LOT|ENTRY|SL|TP|TICKET|COMMENT
       string parts[];
       int p = StringSplit(lines[i], '|', parts);
       if(p < 2) continue;
@@ -289,34 +276,31 @@ void OnTimer()
       n = 1;
    }
 
-   // Always include active chart & all open charts in MT5
-   long chartId = ChartFirst();
-   while(chartId >= 0)
+   // Always include all symbols selected in Market Watch & open charts
+   int mwTotal = SymbolsTotal(true);
+   for(int m = 0; m < mwTotal; m++)
    {
-      string cs = ChartSymbol(chartId);
-      if(StringLen(cs) > 0)
+      string mws = SymbolName(m, true);
+      if(StringLen(mws) > 0)
       {
          bool exists = false;
          for(int s = 0; s < n; s++)
          {
-            if(syms[s] == cs) { exists = true; break; }
+            if(syms[s] == mws) { exists = true; break; }
          }
          if(!exists)
          {
             ArrayResize(syms, n + 1);
-            syms[n] = cs;
+            syms[n] = mws;
             n++;
          }
       }
-      chartId = ChartNext(chartId);
    }
 
-   // Include M1, M3, M5, M15, M30, H1, H4, D1 for Frank Miller SMC models (Ch. 6-8)
    ENUM_TIMEFRAMES tfs[6] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_H1, PERIOD_H4, PERIOD_D1};
    int tfSec[6]           = {60, 300, 900, 3600, 14400, 86400};
 
-   int count = g_initialSent ? 15 : InpFullBars;
-   string kind = g_initialSent ? "live" : "full";
+   int count = InpFullBars; // Always keep full 500 bars in Common\Files\smc_bridge
    int exportedCount = 0;
 
    for(int s = 0; s < n; s++)
@@ -366,16 +350,6 @@ void OnTimer()
             FileClose(fileHandle);
             exportedCount++;
          }
-
-         if(StringLen(InpServerUrl) > 5)
-         {
-            string url = InpServerUrl + "/api/mt5/push?symbol=" + sym + "&tf=" + IntegerToString(tfSec[t]) + "&kind=" + kind;
-            char post[], result[];
-            string headers = "Content-Type: application/json\r\n";
-            StringToCharArray(json, post, 0, StringLen(json));
-            string resHeaders;
-            WebRequest("POST", url, headers, 500, post, result, resHeaders);
-         }
       }
    }
 
@@ -384,7 +358,5 @@ void OnTimer()
       g_lastLog = TimeCurrent();
       Print("SMC_Auto_Bridge: Active sync for ", n, " symbols (", exportedCount, " series updated). Account=", AccountInfoInteger(ACCOUNT_LOGIN));
    }
-
-   g_initialSent = true;
 }
 //+------------------------------------------------------------------+

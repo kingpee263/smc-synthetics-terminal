@@ -13,7 +13,7 @@
   const BT = window.CRTBacktest;
 
   const state = {
-    marketId: '1HZ75V',
+    marketId: '1HZ15V',
     pairKey: '1H_5m',
     layout: 'tri',
     wlCategory: 'all',
@@ -979,18 +979,24 @@
       `;
 
       const pos = ML.calcPositionForAccount(market, activeLvls.entry, activeLvls.sl, activeLvls.tp1, activeLvls.tp2, state.balance, state.riskPct);
+      const acc = F.mt5.accountState;
+      const openOrdersHtml = acc && Array.isArray(acc.orders) && acc.orders.length
+        ? `<div style="margin-top:4px; padding-top:4px; border-top:1px solid var(--border); color:#26a69a;"><b>Active MT5 Positions (${acc.orders.length}):</b> ` +
+          acc.orders.map(o => `#${o.ticket} ${o.symbol} ${o.side} ${o.lot} lot (${o.profit >= 0 ? '+' : ''}$${Number(o.profit).toFixed(2)})`).join(' · ') + `</div>`
+        : '';
       if (riskBadge && riskDetails && riskBox) {
-        riskBadge.textContent = state.autoTradeEnabled ? 'AUTO-EXE ON' : 'MANUAL MODE';
+        riskBadge.textContent = state.autoTradeEnabled ? 'MT5 LIVE AUTO' : 'MANUAL MODE';
         riskBadge.className = `st-pill ${state.autoTradeEnabled ? 'st-live' : 'st-warn'}`;
         riskBox.style.borderLeftColor = pos.overLeveraged ? 'var(--bad)' : 'var(--good)';
         riskDetails.innerHTML = `
-          <div>Account Balance: <b>$${state.balance.toFixed(2)}</b> · Risk: <b>${state.riskPct}% ($${pos.targetRiskUsd.toFixed(2)})</b></div>
-          <div>MT5 Auto Lot: <b style="color:#38bdf8; font-size:12px;">${pos.lotFormatted} lot</b> · Actual Risk: <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></div>
+          <div>MT5 Account: <b>#${acc?.login || '32398784'} (${acc?.server || 'Deriv-Demo'})</b> · Equity: <b>$${(acc?.equity || state.balance).toFixed(2)}</b></div>
+          <div>MT5 Auto Lot: <b style="color:#38bdf8; font-size:12px;">${pos.lotFormatted} lot</b> · Plan Risk: <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></div>
           <div style="color:#d1d4dc; margin-top:2px;">${pos.splitInstruction}</div>
           <div style="display:flex; justify-content:space-between; margin-top:3px; padding-top:3px; border-top:1px solid var(--border);">
             <span>At TP1 (50% EQ): <b style="color:#fbbf24;">+$${pos.tp1ProfitUsd.toFixed(2)}</b></span>
             <span>At TP2 Target: <b style="color:#26a69a;">+$${pos.tp2TotalProfitUsd.toFixed(2)}</b></span>
           </div>
+          ${openOrdersHtml}
           ${pos.overLeveraged ? `<div style="color:#f23645; margin-top:3px;">⚠ ${pos.riskStatus}</div>` : ''}
         `;
       }
@@ -1076,16 +1082,25 @@
     const weeklyTable = document.querySelector('#weeklyCompoundingTable tbody');
 
     const stats = getLedgerStats();
+    const acc = F.mt5.accountState;
+    if (acc && acc.login > 0 && acc.balance > 0) {
+      state.balance = +acc.balance;
+      stats.currentBalance = +acc.equity || +acc.balance;
+    }
     const proj = ML.computeWeeklyProjection(state.balance, state.riskPct, stats);
 
     if (kpisEl) {
+      const openPosCount = acc && Array.isArray(acc.orders) ? acc.orders.length : 0;
+      const openFloating = acc && Array.isArray(acc.orders)
+        ? acc.orders.reduce((s, o) => s + (+o.profit || 0), 0)
+        : 0;
       kpisEl.innerHTML = `
-        <div class="kpi"><div class="kpi-lbl">Account Balance</div><div class="kpi-val" style="color:#38bdf8;">$${stats.currentBalance.toFixed(2)}</div></div>
+        <div class="kpi"><div class="kpi-lbl">MT5 Account #${acc?.login || '32398784'} (${acc?.server || 'Deriv-Demo'})</div><div class="kpi-val" style="color:#38bdf8;">$${stats.currentBalance.toFixed(2)}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Live MT5 Positions (${openPosCount})</div><div class="kpi-val" style="color:${openFloating >= 0 ? '#26a69a' : '#f23645'};">${openFloating >= 0 ? '+' : ''}$${openFloating.toFixed(2)}</div></div>
         <div class="kpi"><div class="kpi-lbl">SMC Win Rate</div><div class="kpi-val" style="color:#26a69a;">${stats.winRate}% (${stats.wins}/${stats.total})</div></div>
-        <div class="kpi"><div class="kpi-lbl">Realized P&amp;L</div><div class="kpi-val" style="color:${stats.totalPnlUsd >= 0 ? '#26a69a' : '#f23645'};">${stats.totalPnlUsd >= 0 ? '+' : ''}$${stats.totalPnlUsd.toFixed(2)} (${stats.totalR >= 0 ? '+' : ''}${stats.totalR.toFixed(2)}R)</div></div>
         <div class="kpi"><div class="kpi-lbl">Est. Weekly Return</div><div class="kpi-val" style="color:#fbbf24;">+$${proj.weeklyUsdThisWeek.toFixed(2)} (+${proj.weeklyReturnPct}%)</div></div>
         <div class="kpi"><div class="kpi-lbl">Auto-Trading Mode</div><div class="kpi-val" style="color:${state.autoTradeEnabled ? '#26a69a' : '#fbbf24'};">${state.autoTradeEnabled ? 'FULL AUTO' : 'MANUAL'}</div></div>
-        <div class="kpi"><div class="kpi-lbl">MT5 Bridge Orders</div><div class="kpi-val">${state.dispatchedCmdIds.size}</div></div>
+        <div class="kpi"><div class="kpi-lbl">MT5 Bridge Orders</div><div class="kpi-val">${state.dispatchedCmdIds.size + openPosCount}</div></div>
       `;
     }
 
@@ -1590,6 +1605,12 @@
   async function startApp() {
     loadPrefs();
     await loadLedger();
+    const acc = await F.mt5.fetchAccountState();
+    if (acc && acc.login > 0 && acc.balance > 0) {
+      state.balance = +acc.balance;
+      state.startBalance = +acc.balance;
+      if (Array.isArray(acc.orders)) state.mt5Orders = acc.orders;
+    }
     startClock();
 
     const tfSeg = document.getElementById('tfSeg');
