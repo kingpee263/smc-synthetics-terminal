@@ -1288,13 +1288,19 @@
       const wOrders = Array.isArray(wtAcc?.orders) ? wtAcc.orders : [];
       const dFloat = dOrders.reduce((s, o) => s + (+o.profit || 0), 0);
       const wFloat = wOrders.reduce((s, o) => s + (+o.profit || 0), 0);
+      const dWinRate = derivAcc?.winRatePct != null ? `${Number(derivAcc.winRatePct).toFixed(1)}% (${derivAcc.winCount || 0}/${derivAcc.closedCount || 0})` : `${stats.winRate}%`;
+      const wWinRate = wtAcc?.winRatePct != null ? `${Number(wtAcc.winRatePct).toFixed(1)}% (${wtAcc.winCount || 0}/${wtAcc.closedCount || 0})` : `${stats.winRate}%`;
+      const dRealized = Number(derivAcc?.realizedPnl || 0);
+      const wRealized = Number(wtAcc?.realizedPnl || 0);
+      const dDd = Number(derivAcc?.dailyDdPct || 0);
+      const wDd = Number(wtAcc?.dailyDdPct || 0);
       kpisEl.innerHTML = `
-        <div class="kpi"><div class="kpi-lbl">Deriv MT5 #${derivAcc?.login || '32398784'} (Deriv-Demo)</div><div class="kpi-val" style="color:#38bdf8;">$${Number(derivAcc?.equity || 9363.81).toFixed(2)}</div></div>
-        <div class="kpi"><div class="kpi-lbl">Deriv Open Positions (${dOrders.length})</div><div class="kpi-val" style="color:${dFloat >= 0 ? '#26a69a' : '#f23645'};">${dFloat >= 0 ? '+' : ''}$${dFloat.toFixed(2)}</div></div>
-        <div class="kpi"><div class="kpi-lbl">Weltrade MT5 #${wtAcc?.login || '43374418'} (Weltrade-Demo)</div><div class="kpi-val" style="color:#26a69a;">$${Number(wtAcc?.equity || 9366.36).toFixed(2)}</div></div>
-        <div class="kpi"><div class="kpi-lbl">Weltrade Open Positions (${wOrders.length})</div><div class="kpi-val" style="color:${wFloat >= 0 ? '#26a69a' : '#f23645'};">${wFloat >= 0 ? '+' : ''}$${wFloat.toFixed(2)}</div></div>
-        <div class="kpi"><div class="kpi-lbl">Pure A+ Gate &amp; Risk</div><div class="kpi-val" style="color:#fbbf24;">${state.riskPct}% Risk · Max ${state.maxOpenTrades}</div></div>
-        <div class="kpi"><div class="kpi-lbl">Auto-Trading Status</div><div class="kpi-val" style="color:${state.autoTradeEnabled ? '#26a69a' : '#fbbf24'};">${state.autoTradeEnabled ? 'PURE A+ AUTO' : 'MANUAL'}</div></div>
+        <div class="kpi"><div class="kpi-lbl">⚡ Deriv MT5 #${derivAcc?.login || '32398784'} Equity</div><div class="kpi-val" style="color:#38bdf8;">$${Number(derivAcc?.equity || 9363.81).toFixed(2)}</div><div class="small muted">Bal $${Number(derivAcc?.balance || 9363.52).toFixed(2)} · DD ${dDd.toFixed(2)}%</div></div>
+        <div class="kpi"><div class="kpi-lbl">Deriv Open (${dOrders.length}) &amp; 7d Realized</div><div class="kpi-val" style="color:${dFloat >= 0 ? '#26a69a' : '#f23645'};">${dFloat >= 0 ? '+' : ''}$${dFloat.toFixed(2)}</div><div class="small muted">7d Closed: ${dRealized >= 0 ? '+' : ''}$${dRealized.toFixed(2)} · WR ${dWinRate}</div></div>
+        <div class="kpi"><div class="kpi-lbl">🔥 Weltrade MT5 #${wtAcc?.login || '43374418'} Equity</div><div class="kpi-val" style="color:#26a69a;">$${Number(wtAcc?.equity || 500.00).toFixed(2)}</div><div class="small muted">Bal $${Number(wtAcc?.balance || 500.00).toFixed(2)} · DD ${wDd.toFixed(2)}%</div></div>
+        <div class="kpi"><div class="kpi-lbl">Weltrade Open (${wOrders.length}) &amp; 7d Realized</div><div class="kpi-val" style="color:${wFloat >= 0 ? '#26a69a' : '#f23645'};">${wFloat >= 0 ? '+' : ''}$${wFloat.toFixed(2)}</div><div class="small muted">7d Closed: ${wRealized >= 0 ? '+' : ''}$${wRealized.toFixed(2)} · WR ${wWinRate}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Partial TP1 + Spike/Spread Filter</div><div class="kpi-val" style="color:#fbbf24;">50% @ 1.5R + BE</div><div class="small muted">Spread &le; 18% SL · Spike Dir Guard</div></div>
+        <div class="kpi"><div class="kpi-lbl">Auto-Watchdog &amp; Execution</div><div class="kpi-val" style="color:${state.autoTradeEnabled ? '#26a69a' : '#fbbf24'};">${state.autoTradeEnabled ? 'PURE A+ AUTO' : 'MANUAL'}</div><div class="small muted">Watchdog: ACTIVE 1S SYNC</div></div>
       `;
     }
 

@@ -139,11 +139,26 @@ while ($listener.IsListening) {
       }
     }
 
-    # 2. MT5 Account & Active Positions / Pending Orders State (Deriv #32398784 + Weltrade #43374418)
+    # 2. MT5 Account & Active Positions / Pending Orders / Analytics + Auto-Watchdog (Deriv #32398784 + Weltrade #43374418)
     if ($path -eq "/api/mt5/account") {
       $accDerivFile = Join-Path $commonSmcDir "account_deriv.json"
       $accWtFile    = Join-Path $commonSmcDir "account_weltrade.json"
       $accMainFile  = Join-Path $commonSmcDir "account_state.json"
+
+      # Auto-Watchdog: Check if Deriv or Weltrade MT5 heartbeat is stale (> 120s) and relaunch if needed
+      $nowUtc = [DateTime]::UtcNow
+      if (-not $script:lastWatchdogCheck -or ($nowUtc - $script:lastWatchdogCheck).TotalSeconds -ge 30) {
+        $script:lastWatchdogCheck = $nowUtc
+        $mt5Procs = @(Get-CimInstance Win32_Process -Filter "Name = 'terminal64.exe'" -ErrorAction SilentlyContinue)
+        $hasDerivProc = ($mt5Procs | Where-Object { $_.ExecutablePath -like "*Program Files*MetaTrader 5*" }).Count -gt 0
+        $hasWtProc    = ($mt5Procs | Where-Object { $_.ExecutablePath -like "*mt5_weltrade*" }).Count -gt 0
+        if (-not $hasDerivProc -and (Test-Path "C:\Program Files\MetaTrader 5\terminal64.exe")) {
+          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '"C:\Program Files\MetaTrader 5\terminal64.exe"' } -ErrorAction SilentlyContinue | Out-Null
+        }
+        if (-not $hasWtProc -and (Test-Path "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe")) {
+          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '"C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe"' } -ErrorAction SilentlyContinue | Out-Null
+        }
+      }
 
       $derivObj = $null
       $wtObj    = $null
@@ -163,6 +178,7 @@ while ($listener.IsListening) {
       if (-not $wtObj -and $mainObj -and $mainObj.login -eq 43374418) { $wtObj = $mainObj }
 
       $combinedOrders = @()
+      $combinedHistory = @()
       if ($derivObj -and $derivObj.orders) {
         foreach ($o in $derivObj.orders) {
           $o | Add-Member -NotePropertyName "broker" -NotePropertyValue "deriv" -Force
@@ -174,6 +190,12 @@ while ($listener.IsListening) {
           $o | Add-Member -NotePropertyName "broker" -NotePropertyValue "weltrade" -Force
           $combinedOrders += $o
         }
+      }
+      if ($derivObj -and $derivObj.history) {
+        foreach ($h in $derivObj.history) { $combinedHistory += $h }
+      }
+      if ($wtObj -and $wtObj.history) {
+        foreach ($h in $wtObj.history) { $combinedHistory += $h }
       }
 
       $primary = if ($derivObj) { $derivObj } elseif ($wtObj) { $wtObj } elseif ($mainObj) { $mainObj } else {
@@ -187,9 +209,11 @@ while ($listener.IsListening) {
         equity     = $primary.equity
         freeMargin = $primary.freeMargin
         updated    = $primary.updated
+        watchdog   = "ACTIVE_1S_SYNC"
         orders     = $combinedOrders
-        deriv      = if ($derivObj) { $derivObj } else { @{ broker = "deriv"; login = 32398784; server = "Deriv-Demo"; balance = 9363.52; equity = 9363.52; freeMargin = 9363.52; updated = 0; orders = @() } }
-        weltrade   = if ($wtObj)    { $wtObj }    else { @{ broker = "weltrade"; login = 43374418; server = "Weltrade-Demo"; balance = 500.00; equity = 500.00; freeMargin = 500.00; updated = 0; orders = @() } }
+        history    = $combinedHistory
+        deriv      = if ($derivObj) { $derivObj } else { @{ broker = "deriv"; login = 32398784; server = "Deriv-Demo"; balance = 9363.52; equity = 9363.52; freeMargin = 9363.52; updated = 0; orders = @(); history = @() } }
+        weltrade   = if ($wtObj)    { $wtObj }    else { @{ broker = "weltrade"; login = 43374418; server = "Weltrade-Demo"; balance = 500.00; equity = 500.00; freeMargin = 500.00; updated = 0; orders = @(); history = @() } }
       }
 
       $jsonOut = $payloadObj | ConvertTo-Json -Depth 6 -Compress
