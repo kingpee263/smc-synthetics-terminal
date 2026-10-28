@@ -288,7 +288,84 @@ void MarkTicketBankedTP1(ulong ticket)
 }
 
 //+------------------------------------------------------------------+
-//| Institutional Portfolio & Symbol Risk Guard                      |
+//| Balance-Tiered Account Growth & Micro-Capital Protection Matrix  |
+//+------------------------------------------------------------------+
+void GetAccountGrowthTier(double equity, string &outTierName, double &outBaseRiskPct, double &outMaxRiskPct, int &outMaxTrades, double &outDailyLossCapPct, double &outDailyProfitLockPct)
+{
+   if(equity < 100.0)
+   {
+      outTierName           = "TIER_1_MICRO_SEED ($10-$99)";
+      outBaseRiskPct        = 0.75;
+      outMaxRiskPct         = 1.50;
+      outMaxTrades          = 1;
+      outDailyLossCapPct    = 2.50;
+      outDailyProfitLockPct = 4.50;
+   }
+   else if(equity < 500.0)
+   {
+      outTierName           = "TIER_2_GROWTH_STARTER ($100-$499)";
+      outBaseRiskPct        = 0.90;
+      outMaxRiskPct         = 1.85;
+      outMaxTrades          = 2;
+      outDailyLossCapPct    = 3.00;
+      outDailyProfitLockPct = 5.00;
+   }
+   else if(equity < 2500.0)
+   {
+      outTierName           = "TIER_3_INSTITUTIONAL ($500-$2,499)";
+      outBaseRiskPct        = InpRiskPercent;
+      outMaxRiskPct         = 2.20;
+      outMaxTrades          = InpMaxOpenTrades;
+      outDailyLossCapPct    = 3.50;
+      outDailyProfitLockPct = 5.50;
+   }
+   else
+   {
+      outTierName           = "TIER_4_PRO_COMPOUNDER ($2,500+)";
+      outBaseRiskPct        = InpRiskPercent;
+      outMaxRiskPct         = InpMaxRiskPercent;
+      outMaxTrades          = InpMaxOpenTrades;
+      outDailyLossCapPct    = InpMaxDailyLossPct;
+      outDailyProfitLockPct = 6.50;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Balance-Tiered Symbol Filter (Blocks Heavy Indices on Micro Acc) |
+//+------------------------------------------------------------------+
+bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBlockReason)
+{
+   string up = sym;
+   StringToUpper(up);
+
+   // Tier 1 Micro Seed ($10 - $99): Block heavy tick-value / wide-swing indices that can blow micro margin
+   if(equity < 100.0)
+   {
+      if(StringFind(up, "SFX VOL 80") >= 0 || StringFind(up, "SFX VOL 99") >= 0 ||
+         StringFind(up, "PAINX 1200") >= 0 || StringFind(up, "GAINX 1200") >= 0 ||
+         StringFind(up, "MAX PAINX 2000") >= 0 || StringFind(up, "MAX GAINX 2000") >= 0 ||
+         StringFind(up, "BREAKX 1800") >= 0 || StringFind(up, "SWITCHX 1800") >= 0 ||
+         StringFind(up, "JUMP 100") >= 0 || StringFind(up, "BOOM 1000") >= 0 || StringFind(up, "CRASH 1000") >= 0)
+      {
+         outBlockReason = StringFormat("Balance-Tier Shield ($%.2f < $100): Blocked heavy index %s (Only Micro-Safe symbols allowed)", equity, sym);
+         return false;
+      }
+   }
+   // Tier 2 Growth Starter ($100 - $249): Block ultra-heavy 1800/2000 indices
+   else if(equity < 250.0)
+   {
+      if(StringFind(up, "MAX PAINX 2000") >= 0 || StringFind(up, "MAX GAINX 2000") >= 0 ||
+         StringFind(up, "SFX VOL 99") >= 0)
+      {
+         outBlockReason = StringFormat("Balance-Tier Shield ($%.2f < $250): Blocked ultra-heavy index %s", equity, sym);
+         return false;
+      }
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Institutional Portfolio, Balance-Tier & Symbol Risk Guard        |
 //+------------------------------------------------------------------+
 bool CanOpenNewTrade(const string sym, const string comment, string &outReason)
 {
@@ -307,14 +384,32 @@ bool CanOpenNewTrade(const string sym, const string comment, string &outReason)
    }
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(equity <= 0.0) equity = balance;
+
+   string tierName = ""; double tierBaseRisk = 1.0, tierMaxRisk = 2.5, tierDdCap = 4.0, tierProfitLock = 5.0;
+   int tierMaxTrades = InpMaxOpenTrades;
+   GetAccountGrowthTier(equity, tierName, tierBaseRisk, tierMaxRisk, tierMaxTrades, tierDdCap, tierProfitLock);
+
+   if(!IsSymbolSafeForAccountTier(sym, equity, outReason))
+      return false;
+
    double refCap = MathMax(g_dayStartEquity, balance);
    if(refCap > 0.0)
    {
       double ddPct = ((refCap - equity) / refCap) * 100.0;
-      if(ddPct >= InpMaxDailyLossPct)
+      if(ddPct >= tierDdCap)
       {
-         outReason = StringFormat("Daily Drawdown Breaker Active (%.2f%% >= %.2f%%)", ddPct, InpMaxDailyLossPct);
+         outReason = StringFormat("[%s] Daily Drawdown Breaker Active (%.2f%% >= %.2f%%)", tierName, ddPct, tierDdCap);
          return false;
+      }
+      if(g_dayStartEquity > 0.0)
+      {
+         double dayGainPct = ((equity - g_dayStartEquity) / g_dayStartEquity) * 100.0;
+         if(dayGainPct >= tierProfitLock)
+         {
+            outReason = StringFormat("[%s] Daily Profit Target Locked (+%.2f%% >= +%.2f%% goal)", tierName, dayGainPct, tierProfitLock);
+            return false;
+         }
       }
    }
 
@@ -345,9 +440,9 @@ bool CanOpenNewTrade(const string sym, const string comment, string &outReason)
       openCount++;
    }
 
-   if(openCount >= InpMaxOpenTrades)
+   if(openCount >= tierMaxTrades)
    {
-      outReason = StringFormat("Max Open Trades Reached (%d/%d)", openCount, InpMaxOpenTrades);
+      outReason = StringFormat("[%s] Max Concurrent Trades Reached (%d/%d)", tierName, openCount, tierMaxTrades);
       return false;
    }
 
@@ -511,7 +606,13 @@ double CalculateRiskLot(const string sym, bool isBuy, double entryPrice, double 
 
    int streak = 0;
    GetAccountStreakAndAdaptiveRisk(sym, isBuy, rr, outAdaptivePct, outRiskMode, streak);
-   double riskPct = MathMin(MathMax(outAdaptivePct, 0.10), InpMaxRiskPercent);
+
+   string tierName = ""; double tierBaseRisk = 1.0, tierMaxRisk = InpMaxRiskPercent, tierDdCap = 4.0, tierProfitLock = 5.0;
+   int tierMaxTrades = InpMaxOpenTrades;
+   GetAccountGrowthTier(equity, tierName, tierBaseRisk, tierMaxRisk, tierMaxTrades, tierDdCap, tierProfitLock);
+
+   double effectivePct = MathMin(outAdaptivePct, tierBaseRisk * 1.35);
+   double riskPct = MathMin(MathMax(effectivePct, 0.10), tierMaxRisk);
    double targetRiskUsd = equity * (riskPct / 100.0);
 
    double volMin  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
@@ -550,11 +651,11 @@ double CalculateRiskLot(const string sym, bool isBuy, double entryPrice, double 
    {
       double minLotLoss = lossForOneLot * volMin;
       double minLotRiskPct = (minLotLoss / equity) * 100.0;
-      if(minLotRiskPct > InpMaxRiskPercent)
+      if(minLotRiskPct > tierMaxRisk)
       {
-         Print("SMC_Auto_Bridge [RISK GUARD] Blocked ", sym, ": Min lot (", volMin,
+         Print("SMC_Auto_Bridge [", tierName, " SHIELD] Blocked ", sym, ": Min lot (", volMin,
                ") risks $", DoubleToString(minLotLoss, 2), " (", DoubleToString(minLotRiskPct, 2),
-               "% > Max ", DoubleToString(InpMaxRiskPercent, 2), "%)");
+               "% > Tier Max ", DoubleToString(tierMaxRisk, 2), "%)");
          return 0.0;
       }
       snappedLots = volMin;
@@ -1113,9 +1214,14 @@ void ExportAccountAndOrders()
    int    curStreak = 0;
    GetAccountStreakAndAdaptiveRisk(_Symbol, true, 2.6, curAdaptivePct, curAdaptiveMode, curStreak);
 
+   string tierName = ""; double tierBaseRisk = 1.0, tierMaxRisk = 2.5, tierDdCap = 4.0, tierProfitLock = 5.0;
+   int tierMaxTrades = InpMaxOpenTrades;
+   GetAccountGrowthTier(eq > 0 ? eq : bal, tierName, tierBaseRisk, tierMaxRisk, tierMaxTrades, tierDdCap, tierProfitLock);
+   double dayGainPct = (g_dayStartEquity > 0.0 && eq > g_dayStartEquity) ? (((eq - g_dayStartEquity) / g_dayStartEquity) * 100.0) : 0.0;
+
    string stateJson = StringFormat(
-      "{\"broker\":\"%s\",\"login\":%I64d,\"server\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"freeMargin\":%.2f,\"floatingPnl\":%.2f,\"realizedPnl\":%.2f,\"closedCount\":%d,\"winCount\":%d,\"lossCount\":%d,\"winRatePct\":%.1f,\"dailyDdPct\":%.2f,\"partialTpCount\":%d,\"adaptiveRiskPct\":%.2f,\"adaptiveMode\":\"%s\",\"currentStreak\":%d,\"updated\":%I64d,\"orders\":%s,\"history\":%s}",
-      broker, login, srv, bal, eq, margin, floatingPnl, realizedPnl, closedCount, winCount, lossCount, winRatePct, dailyDdPct, g_partialClosedCount, curAdaptivePct, curAdaptiveMode, curStreak, (long)TimeCurrent(), posJson, histJson
+      "{\"broker\":\"%s\",\"login\":%I64d,\"server\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"freeMargin\":%.2f,\"floatingPnl\":%.2f,\"realizedPnl\":%.2f,\"closedCount\":%d,\"winCount\":%d,\"lossCount\":%d,\"winRatePct\":%.1f,\"dailyDdPct\":%.2f,\"dailyProfitPct\":%.2f,\"partialTpCount\":%d,\"adaptiveRiskPct\":%.2f,\"adaptiveMode\":\"%s\",\"currentStreak\":%d,\"tierName\":\"%s\",\"tierMaxRiskPct\":%.2f,\"tierMaxTrades\":%d,\"tierProfitLockPct\":%.2f,\"updated\":%I64d,\"orders\":%s,\"history\":%s}",
+      broker, login, srv, bal, eq, margin, floatingPnl, realizedPnl, closedCount, winCount, lossCount, winRatePct, dailyDdPct, dayGainPct, g_partialClosedCount, curAdaptivePct, curAdaptiveMode, curStreak, tierName, tierMaxRisk, tierMaxTrades, tierProfitLock, (long)TimeCurrent(), posJson, histJson
    );
 
    string brokerFile = IsWeltradeBroker() ? "smc_bridge\\account_weltrade.json" : "smc_bridge\\account_deriv.json";
@@ -1124,6 +1230,17 @@ void ExportAccountAndOrders()
    {
       FileWriteString(fhB, stateJson);
       FileClose(fhB);
+   }
+
+   if(login > 0)
+   {
+      string loginFile = "smc_bridge\\account_" + IntegerToString(login) + ".json";
+      int fhL = FileOpen(loginFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+      if(fhL != INVALID_HANDLE)
+      {
+         FileWriteString(fhL, stateJson);
+         FileClose(fhL);
+      }
    }
 
    int fh = FileOpen("smc_bridge\\account_state.json", FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
@@ -1321,6 +1438,13 @@ void ProcessCommandQueue()
    string brokerQueue = IsWeltradeBroker() ? "smc_bridge\\commands_weltrade.txt" : "smc_bridge\\commands_deriv.txt";
    ProcessQueueFile(brokerQueue);
    ProcessQueueFile("smc_bridge\\commands_queue.txt");
+
+   long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   if(login > 0)
+   {
+      string clientQueue = "smc_bridge\\commands_" + IntegerToString(login) + ".txt";
+      ProcessQueueFile(clientQueue);
+   }
 }
 
 //+------------------------------------------------------------------+

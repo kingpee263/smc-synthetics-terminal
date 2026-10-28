@@ -1,6 +1,7 @@
 $port = 8095
 $root = "C:\Users\Administrator\.gemini\antigravity\scratch\smc-synthetics-terminal"
-$ledgerFile = Join-Path $root "data\trades_ledger.json"
+$ledgerFile  = Join-Path $root "data\trades_ledger.json"
+$clientsFile = Join-Path $root "data\client_accounts.json"
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$port/")
 $listener.Start()
@@ -243,7 +244,132 @@ while ($listener.IsListening) {
       continue
     }
 
-    # 4. MT5 Command Queue (Routes to Deriv #32398784 or Weltrade #43374418)
+    # 4. Multi-User Client Accounts API (/api/clients - GET, POST, DELETE)
+    if ($path -eq "/api/clients") {
+      if ($req.HttpMethod -eq "GET") {
+        $clientsList = @()
+        if (Test-Path $clientsFile) {
+          try { $clientsList = [System.IO.File]::ReadAllText($clientsFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
+        }
+        if (-not $clientsList) { $clientsList = @() }
+
+        $enriched = @()
+        foreach ($c in $clientsList) {
+          $login = $c.login
+          $broker = $c.broker.ToLower()
+          $accFile = Join-Path $commonSmcDir "account_$login.json"
+          if (-not (Test-Path $accFile)) {
+            $accFile = if ($broker -eq "weltrade") { Join-Path $commonSmcDir "account_weltrade.json" } else { Join-Path $commonSmcDir "account_deriv.json" }
+          }
+
+          $liveBal = 0.0; $liveEq = 0.0; $tier = "TIER_1_MICRO_SEED ($10-$99)"; $dd = 0.0; $profit = 0.0; $openCount = 0; $updated = 0
+          if (Test-Path $accFile) {
+            try {
+              $accData = [System.IO.File]::ReadAllText($accFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+              if ($accData) {
+                $liveBal   = [double]($accData.balance)
+                $liveEq    = [double]($accData.equity)
+                $tier      = if ($accData.tierName) { $accData.tierName } else { "TIER_1_MICRO_SEED" }
+                $dd        = [double]($accData.dailyDdPct)
+                $profit    = [double]($accData.dailyProfitPct)
+                $openCount = if ($accData.orders) { @($accData.orders).Count } else { 0 }
+                $updated   = [long]($accData.updated)
+              }
+            } catch {}
+          }
+
+          $cObj = @{
+            id           = $c.id
+            name         = $c.name
+            broker       = $c.broker
+            login        = $c.login
+            server       = $c.server
+            role         = if ($c.role) { $c.role } else { "CLIENT" }
+            enabled      = if ($null -ne $c.enabled) { $c.enabled } else { $true }
+            riskMode     = if ($c.riskMode) { $c.riskMode } else { "BALANCE_TIERED" }
+            riskPct      = if ($c.riskPct) { $c.riskPct } else { 1.0 }
+            token        = $c.token
+            balance      = $liveBal
+            equity       = $liveEq
+            tierName     = $tier
+            dailyDdPct   = $dd
+            dailyProfitPct = $profit
+            openPositions = $openCount
+            updated      = $updated
+            online       = ($updated -gt 0 -and ((Get-Date).ToUniversalTime() - [DateTimeOffset]::FromUnixTimeSeconds($updated).UtcDateTime).TotalSeconds -lt 120)
+          }
+          $enriched += $cObj
+        }
+
+        $jsonOut = $enriched | ConvertTo-Json -Depth 5 -Compress
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonOut)
+        $res.ContentType = "application/json; charset=utf-8"
+        $res.OutputStream.Write($bytes, 0, $bytes.Length)
+        $res.OutputStream.Close()
+        continue
+      }
+      elseif ($req.HttpMethod -eq "POST") {
+        $reader = New-Object System.IO.StreamReader($req.InputStream)
+        $body = $reader.ReadToEnd()
+        $reader.Close()
+        if ($body -and $body.Length -gt 5) {
+          try {
+            $newAcc = $body | ConvertFrom-Json
+            $clientsList = @()
+            if (Test-Path $clientsFile) {
+              try { $clientsList = @([System.IO.File]::ReadAllText($clientsFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json) } catch {}
+            }
+            $accId = "usr-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
+            $token = "SMC-COP-" + $newAcc.login
+            $accEntry = @{
+              id       = $accId
+              name     = $newAcc.name
+              broker   = $newAcc.broker.ToLower()
+              login    = [long]$newAcc.login
+              server   = $newAcc.server
+              role     = "CLIENT"
+              enabled  = $true
+              riskMode = if ($newAcc.riskMode) { $newAcc.riskMode } else { "BALANCE_TIERED" }
+              riskPct  = if ($newAcc.riskPct) { [double]$newAcc.riskPct } else { 1.0 }
+              token    = $token
+              addedAt  = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            }
+            # Remove existing entry with same login if any
+            $clientsList = @($clientsList | Where-Object { $_.login -ne $accEntry.login })
+            $clientsList += $accEntry
+            [System.IO.File]::WriteAllText($clientsFile, ($clientsList | ConvertTo-Json -Depth 5), [System.Text.Encoding]::UTF8)
+          } catch {}
+        }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true,"message":"Client account saved & connected"}')
+        $res.ContentType = "application/json"
+        $res.OutputStream.Write($bytes, 0, $bytes.Length)
+        $res.OutputStream.Close()
+        continue
+      }
+      elseif ($req.HttpMethod -eq "DELETE") {
+        $reader = New-Object System.IO.StreamReader($req.InputStream)
+        $body = $reader.ReadToEnd()
+        $reader.Close()
+        if ($body) {
+          try {
+            $delObj = $body | ConvertFrom-Json
+            $clientsList = @()
+            if (Test-Path $clientsFile) {
+              try { $clientsList = @([System.IO.File]::ReadAllText($clientsFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json) } catch {}
+            }
+            $clientsList = @($clientsList | Where-Object { $_.id -ne $delObj.id -and $_.login -ne $delObj.login })
+            [System.IO.File]::WriteAllText($clientsFile, ($clientsList | ConvertTo-Json -Depth 5), [System.Text.Encoding]::UTF8)
+          } catch {}
+        }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true,"message":"Client account removed"}')
+        $res.ContentType = "application/json"
+        $res.OutputStream.Write($bytes, 0, $bytes.Length)
+        $res.OutputStream.Close()
+        continue
+      }
+    }
+
+    # 5. MT5 Command Queue & Multi-Account Copier Fan-Out
     if ($path -eq "/api/mt5/command" -and $req.HttpMethod -eq "POST") {
       $reader = New-Object System.IO.StreamReader($req.InputStream)
       $body = $reader.ReadToEnd()
@@ -269,6 +395,23 @@ while ($listener.IsListening) {
           $line = "$cmdId|$action|$sym|$side|$lot|$entry|$sl|$tp|$ticket|$comm`r`n"
           $cmdFile = Join-Path $commonSmcDir $targetQueue
           [System.IO.File]::AppendAllText($cmdFile, $line, [System.Text.Encoding]::ASCII)
+
+          # Auto-Copier: Dispatch to any connected client accounts on this broker
+          if (Test-Path $clientsFile) {
+            try {
+              $allClients = [System.IO.File]::ReadAllText($clientsFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+              foreach ($cl in $allClients) {
+                if ($cl.enabled -and $cl.role -ne "MASTER") {
+                  $clBroker = $cl.broker.ToLower()
+                  if (($isWeltrade -and $clBroker -eq "weltrade") -or (-not $isWeltrade -and $clBroker -eq "deriv")) {
+                    $clQueue = Join-Path $commonSmcDir ("commands_" + $cl.login + ".txt")
+                    $clLine  = "$cmdId|$action|$sym|$side|$lot|$entry|$sl|$tp|$ticket|$comm`r`n"
+                    [System.IO.File]::AppendAllText($clQueue, $clLine, [System.Text.Encoding]::ASCII)
+                  }
+                }
+              }
+            } catch {}
+          }
         } catch {}
       }
       $bytes = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true,"queued":true}')

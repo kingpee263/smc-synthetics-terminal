@@ -1,0 +1,28 @@
+[
+  {
+    "id": "master-deriv",
+    "name": "Master Deriv Portfolio",
+    "broker": "deriv",
+    "login": 32398784,
+    "server": "Deriv-Demo",
+    "role": "MASTER",
+    "enabled": true,
+    "riskMode": "ADAPTIVE_STREAK",
+    "riskPct": 1.0,
+    "token": "SMC-MST-32398784",
+    "addedAt": 1729000000000
+  },
+  {
+    "id": "master-weltrade",
+    "name": "Master Weltrade Portfolio",
+    "broker": "weltrade",
+    "login": 43374418,
+    "server": "Weltrade-Demo",
+    "role": "MASTER",
+    "enabled": true,
+    "riskMode": "ADAPTIVE_STREAK",
+    "riskPct": 1.0,
+    "token": "SMC-MST-43374418",
+    "addedAt": 1729000000000
+  }
+]

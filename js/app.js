@@ -927,6 +927,44 @@
       });
     }
 
+    // Live MT5 Active Position / Order Plotting on Chart
+    const mktSym = (series?.market?.mt5Symbol || series?.market?.name || '').toLowerCase();
+    const mktId  = (series?.market?.id || '').toLowerCase();
+    const matchingMt5Orders = (state.mt5Orders || []).filter(o => {
+      const s = (o.symbol || '').toLowerCase();
+      return s === mktSym || s === mktId || (mktSym && s.includes(mktSym));
+    });
+    for (const ord of matchingMt5Orders) {
+      const isBuy = ord.side === 'BUY' || ord.side === 'BUY_LIMIT';
+      const col = isBuy ? '#089981' : '#f23645';
+      if (ord.entry > 0) {
+        priceLines.push({
+          price: ord.entry,
+          color: col,
+          width: 2,
+          label: `⚡ MT5 ${ord.side} #${ord.ticket} (${ord.lot} lot @ ${ord.entry}) [PnL ${ord.profit >= 0 ? '+' : ''}$${Number(ord.profit).toFixed(2)}]`
+        });
+      }
+      if (ord.sl > 0) {
+        priceLines.push({
+          price: ord.sl,
+          color: '#f23645',
+          width: 1.5,
+          dash: true,
+          label: `🛡 MT5 SL #${ord.ticket} (${ord.sl})`
+        });
+      }
+      if (ord.tp > 0) {
+        priceLines.push({
+          price: ord.tp,
+          color: '#089981',
+          width: 1.5,
+          dash: true,
+          label: `🎯 MT5 TP #${ord.ticket} (${ord.tp})`
+        });
+      }
+    }
+
     return { boxes, lines, bands, markers, priceLines, positionBox };
   }
 
@@ -1752,6 +1790,308 @@
         renderJournal();
       });
     });
+
+    renderJournalLiveTable();
+  }
+
+  function renderJournalLiveTable() {
+    const liveBody = document.querySelector('#journalLiveTable tbody');
+    const badge = document.getElementById('journalLiveBadge');
+    if (!liveBody) return;
+    const orders = state.mt5Orders || [];
+    if (badge) badge.textContent = `${orders.length} ACTIVE`;
+
+    if (!orders.length) {
+      liveBody.innerHTML = `<tr><td colspan="11" class="muted" style="text-align:center; padding:12px;">No active MT5 trades in market. Bot is scanning for Pure A+ 7/7 setups.</td></tr>`;
+      return;
+    }
+
+    liveBody.innerHTML = orders.map(o => {
+      const isDeriv = o.broker === 'deriv' || !o.broker;
+      const bTag = isDeriv ? '⚡ Deriv' : '🔥 Weltrade';
+      const col = o.profit >= 0 ? '#26a69a' : '#f23645';
+      const pnlTxt = `${o.profit >= 0 ? '+' : ''}$${Number(o.profit).toFixed(2)}`;
+      return `
+        <tr>
+          <td><b>${bTag}</b></td>
+          <td class="mono">#${o.ticket}</td>
+          <td><b>${o.symbol}</b></td>
+          <td><b style="color:${o.side.includes('BUY') ? '#26a69a' : '#f23645'};">${o.side}</b></td>
+          <td><span class="mono">${o.lot} lot</span></td>
+          <td class="mono">${o.entry}</td>
+          <td class="mono">${o.current || '—'}</td>
+          <td class="mono" style="color:#f23645;">${o.sl || '—'}</td>
+          <td class="mono" style="color:#26a69a;">${o.tp || '—'}</td>
+          <td class="mono" style="color:${col}; font-weight:700;">${pnlTxt}</td>
+          <td>
+            <div style="display:flex; gap:4px;">
+              <button class="btn ghost small" style="padding:1px 6px; font-size:10.5px; border-color:#38bdf8; color:#38bdf8;" data-mt5action="be" data-ticket="${o.ticket}" data-sym="${o.symbol}" data-broker="${o.broker}" data-entry="${o.entry}">🛡 BE</button>
+              <button class="btn ghost small" style="padding:1px 6px; font-size:10.5px; border-color:#f23645; color:#f23645;" data-mt5action="close" data-ticket="${o.ticket}" data-sym="${o.symbol}" data-broker="${o.broker}">✕ Close</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    wireMt5OrderActionButtons(liveBody);
+  }
+
+  /* ---------------- Multi-Table MT5 Live Orders Renderer ---------------- */
+  function renderAllLiveMt5Tables() {
+    const orders = state.mt5Orders || [];
+    const termBody = document.querySelector('#terminalLiveOrdersTable tbody');
+    const termBadge = document.getElementById('terminalLiveOrdersBadge');
+    const sigBody  = document.querySelector('#signalsLiveOrdersTable tbody');
+    const sigBadge = document.getElementById('signalsLiveOrdersBadge');
+
+    if (termBadge) termBadge.textContent = `${orders.length} ACTIVE`;
+    if (sigBadge)  sigBadge.textContent  = `${orders.length} ACTIVE`;
+
+    const emptyRow = `<tr><td colspan="12" class="muted" style="text-align:center; padding:12px;">No active MT5 trades in market. Both Deriv &amp; Weltrade auto-bridges are online and scanning.</td></tr>`;
+
+    if (termBody) {
+      if (!orders.length) {
+        termBody.innerHTML = emptyRow;
+      } else {
+        termBody.innerHTML = orders.map(o => {
+          const isDeriv = o.broker === 'deriv' || !o.broker;
+          const bTag = isDeriv ? '⚡ Deriv' : '🔥 Weltrade';
+          const col = o.profit >= 0 ? '#26a69a' : '#f23645';
+          const pnlTxt = `${o.profit >= 0 ? '+' : ''}$${Number(o.profit).toFixed(2)}`;
+          return `
+            <tr>
+              <td><b>${bTag}</b></td>
+              <td class="mono">#${o.ticket}</td>
+              <td><b>${o.symbol}</b></td>
+              <td><b style="color:${o.side.includes('BUY') ? '#26a69a' : '#f23645'};">${o.side}</b></td>
+              <td><span class="mono">${o.lot} lot</span></td>
+              <td class="mono">${o.entry}</td>
+              <td class="mono">${o.current || '—'}</td>
+              <td class="mono" style="color:#f23645;">${o.sl || '—'}</td>
+              <td class="mono" style="color:#26a69a;">${o.tp || '—'}</td>
+              <td class="mono" style="color:${col}; font-weight:700;">${pnlTxt}</td>
+              <td><span class="st-pill ${o.tp1Banked ? 'st-good' : 'st-live'}">${o.tp1Banked ? 'TP1 Banked + BE' : 'IN TRADE'}</span></td>
+              <td>
+                <div style="display:flex; gap:4px;">
+                  <button class="btn ghost small" style="padding:1px 6px; font-size:10.5px; border-color:#38bdf8; color:#38bdf8;" data-mt5action="be" data-ticket="${o.ticket}" data-sym="${o.symbol}" data-broker="${o.broker}" data-entry="${o.entry}">Lock BE</button>
+                  <button class="btn ghost small" style="padding:1px 6px; font-size:10.5px; border-color:#f23645; color:#f23645;" data-mt5action="close" data-ticket="${o.ticket}" data-sym="${o.symbol}" data-broker="${o.broker}">Close</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+        wireMt5OrderActionButtons(termBody);
+      }
+    }
+
+    if (sigBody) {
+      if (!orders.length) {
+        sigBody.innerHTML = emptyRow;
+      } else {
+        sigBody.innerHTML = orders.map(o => {
+          const isDeriv = o.broker === 'deriv' || !o.broker;
+          const bLabel = isDeriv ? `⚡ Deriv #${F.mt5.derivAccount?.login || '32398784'}` : `🔥 Weltrade #${F.mt5.weltradeAccount?.login || '43374418'}`;
+          const col = o.profit >= 0 ? '#26a69a' : '#f23645';
+          const pnlTxt = `${o.profit >= 0 ? '+' : ''}$${Number(o.profit).toFixed(2)}`;
+          return `
+            <tr>
+              <td><b>${bLabel}</b></td>
+              <td class="mono">#${o.ticket}</td>
+              <td><span class="st-pill st-live">${o.kind || 'POSITION'}</span></td>
+              <td><b>${o.symbol}</b></td>
+              <td><b style="color:${o.side.includes('BUY') ? '#26a69a' : '#f23645'};">${o.side}</b></td>
+              <td><span class="mono">${o.lot} lot</span></td>
+              <td class="mono">${o.entry}</td>
+              <td class="mono">${o.current || '—'}</td>
+              <td class="mono" style="color:#f23645;">${o.sl || '—'}</td>
+              <td class="mono" style="color:#26a69a;">${o.tp || '—'}</td>
+              <td class="mono" style="color:${col}; font-weight:700;">${pnlTxt}</td>
+              <td>
+                <button class="btn ghost small" style="padding:1px 6px; font-size:10.5px; border-color:#f23645; color:#f23645;" data-mt5action="close" data-ticket="${o.ticket}" data-sym="${o.symbol}" data-broker="${o.broker}">✕ Close</button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+        wireMt5OrderActionButtons(sigBody);
+      }
+    }
+
+    renderJournalLiveTable();
+  }
+
+  function wireMt5OrderActionButtons(container) {
+    if (!container) return;
+    container.querySelectorAll('[data-mt5action]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const action = btn.dataset.mt5action;
+        const ticket = +btn.dataset.ticket;
+        const sym = btn.dataset.sym;
+        const broker = btn.dataset.broker || 'deriv';
+        const entry = +btn.dataset.entry;
+
+        if (action === 'close') {
+          btn.disabled = true;
+          btn.textContent = 'Closing…';
+          await F.mt5.sendCommand({
+            id: `CLOSE-${Date.now()}`,
+            broker,
+            action: 'CLOSE',
+            symbol: sym,
+            ticket
+          });
+          toast(`<b>MT5 Position Closed:</b> Sent close command for ticket #${ticket} (${sym})`);
+          setTimeout(pollLiveMt5State, 600);
+        } else if (action === 'be') {
+          btn.disabled = true;
+          btn.textContent = 'BE…';
+          await F.mt5.sendCommand({
+            id: `BE-${Date.now()}`,
+            broker,
+            action: 'MODIFY_SLTP',
+            symbol: sym,
+            sl: entry,
+            ticket
+          });
+          toast(`<b>🛡 Breakeven Locked:</b> Moved SL on #${ticket} (${sym}) to Entry ${entry}`);
+          setTimeout(pollLiveMt5State, 600);
+        }
+      });
+    });
+  }
+
+  /* ---------------- Auto-Sync MT5 Closed Trades into Trade Journal ---------------- */
+  function autoSyncMt5TradesToJournal(accState) {
+    if (!accState) return;
+    const history = Array.isArray(accState.history) ? accState.history : [];
+    if (!history.length) return;
+
+    let journalChanged = false;
+    for (const h of history) {
+      const ticketStr = String(h.ticket);
+      const alreadyJournaled = state.journal.some(j => (j.notes || '').includes(ticketStr));
+      if (!alreadyJournaled && h.symbol && h.profit != null) {
+        const dateStr = T.fmtCAT(h.time ? h.time * 1000 : Date.now());
+        const isWin = h.profit > 0;
+        const estR = isWin ? +(h.profit / Math.max(state.balance * 0.01, 1)).toFixed(2) : -1.0;
+        state.journal.unshift({
+          date: dateStr,
+          market: h.symbol,
+          pair: 'H1 → M5 (MT5 Auto-Bridge)',
+          dir: h.side || 'BUY',
+          model: 'Pure A+ SMC (MT5 Native)',
+          took50: isWin ? 'Banked 50% TP1 + Trailed' : 'Stop Loss Respected',
+          r: estR,
+          mistake: 'None — Institutional SMC Auto-Execution',
+          notes: `MT5 Deal #${h.ticket} on ${h.broker || 'deriv'}. Closed @ ${h.closePrice || '—'}. Net PnL: ${h.profit >= 0 ? '+' : ''}$${Number(h.profit).toFixed(2)} (${estR}R).`
+        });
+        journalChanged = true;
+      }
+    }
+
+    if (journalChanged) {
+      saveJournal();
+      renderJournal();
+      syncLedger();
+    }
+  }
+
+  /* ---------------- Multi-User Client Accounts & Copier UI ---------------- */
+  async function loadAndRenderClients() {
+    const tableBody = document.querySelector('#clientsTable tbody');
+    const badge = document.getElementById('clientCountBadge');
+    const kpisEl = document.getElementById('clientsKpis');
+    if (!tableBody) return;
+
+    try {
+      const r = await fetch('/api/clients', { cache: 'no-store' });
+      if (!r.ok) return;
+      const clients = await r.json();
+      if (!Array.isArray(clients)) return;
+
+      if (badge) badge.textContent = String(clients.length);
+
+      const totalManaged = clients.reduce((acc, c) => acc + (Number(c.equity) || Number(c.balance) || 0), 0);
+      const activeCount = clients.filter(c => c.enabled).length;
+
+      if (kpisEl) {
+        kpisEl.innerHTML = `
+          <div class="kpi"><div class="kpi-lbl">Total Managed Capital</div><div class="kpi-val" style="color:#38bdf8;">$${totalManaged.toFixed(2)}</div></div>
+          <div class="kpi"><div class="kpi-lbl">Connected Accounts</div><div class="kpi-val" style="color:#26a69a;">${clients.length} Accounts</div></div>
+          <div class="kpi"><div class="kpi-lbl">Active Auto-Copiers</div><div class="kpi-val" style="color:#26a69a;">${activeCount} Copiers LIVE</div></div>
+          <div class="kpi"><div class="kpi-lbl">Micro-Capital Protection</div><div class="kpi-val" style="color:#fbbf24;">4-Tier Shield Active</div></div>
+        `;
+      }
+
+      tableBody.innerHTML = clients.map(c => {
+        const isDeriv = c.broker === 'deriv';
+        const bTag = isDeriv ? '⚡ Deriv' : '🔥 Weltrade';
+        const statusBadge = c.online
+          ? '<span class="st-pill st-live">ONLINE 1s SYNC</span>'
+          : '<span class="st-pill st-muted">STANDBY / READY</span>';
+        const tierCol = (c.tierName || '').includes('TIER_1') ? '#38bdf8' : ((c.tierName || '').includes('TIER_2') ? '#26a69a' : '#fbbf24');
+        return `
+          <tr>
+            <td>
+              <div style="font-weight:700; color:#fff;">${c.name}</div>
+              <div class="small muted mono">${c.role || 'CLIENT'} · #${c.login}</div>
+            </td>
+            <td>
+              <div><b>${bTag}</b></div>
+              <div class="small muted">${c.server}</div>
+            </td>
+            <td>
+              <div class="mono" style="color:#38bdf8; font-weight:700;">$${Number(c.equity || 0).toFixed(2)}</div>
+              <div class="small muted">Bal: $${Number(c.balance || 0).toFixed(2)}</div>
+            </td>
+            <td>
+              <div style="color:${tierCol}; font-weight:600; font-size:11.5px;">${c.tierName || 'Tier 1 Micro'}</div>
+            </td>
+            <td>
+              <div class="mono" style="color:${c.dailyProfitPct >= 0 ? '#26a69a' : '#f23645'}; font-weight:600;">+${Number(c.dailyProfitPct || 0).toFixed(2)}%</div>
+              <div class="small muted">DD: ${Number(c.dailyDdPct || 0).toFixed(2)}%</div>
+            </td>
+            <td>
+              <span class="mono" style="font-weight:700;">${c.openPositions || 0}</span>
+            </td>
+            <td>${statusBadge}</td>
+            <td>
+              <span class="mono small" style="background:var(--bg-0); padding:2px 5px; border-radius:3px;">${c.token || '—'}</span>
+            </td>
+            <td>
+              ${c.role === 'MASTER' ? '<span class="small muted">MASTER PORTFOLIO</span>' : `<button class="btn ghost small" style="padding:1px 6px; font-size:10.5px; border-color:#f23645; color:#f23645;" data-delclient="${c.login}">Remove</button>`}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      tableBody.querySelectorAll('[data-delclient]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const login = +btn.dataset.delclient;
+          if (confirm(`Remove client account #${login} from auto-copier?`)) {
+            await fetch('/api/clients', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ login })
+            });
+            toast(`Client account #${login} removed.`);
+            loadAndRenderClients();
+          }
+        });
+      });
+    } catch (e) {}
+  }
+
+  /* ---------------- Real-Time MT5 State Poller ---------------- */
+  async function pollLiveMt5State() {
+    try {
+      const acc = await F.mt5.fetchAccountState();
+      if (acc) {
+        if (Array.isArray(acc.orders)) state.mt5Orders = acc.orders;
+        renderAllLiveMt5Tables();
+        autoSyncMt5TradesToJournal(acc);
+        if (state.series) applyChartAnnotations(false);
+      }
+    } catch (e) {}
   }
 
   /* ---------------- Playbook Reference ---------------- */
@@ -1978,6 +2318,9 @@
             x.classList.toggle('active', x.dataset.sbroker === state.signalBrokerFilter);
           });
           renderPureSignalsPage();
+        } else if (vName === 'clients') {
+          document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-clients'));
+          loadAndRenderClients();
         } else {
           document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${vName}`));
         }
@@ -2076,15 +2419,45 @@
       e.target.reset();
     });
 
+    document.getElementById('clientAccountForm')?.addEventListener('submit', async e => {
+      e.preventDefault();
+      const name     = document.getElementById('clName').value.trim();
+      const broker   = document.getElementById('clBroker').value;
+      const login    = +document.getElementById('clLogin').value;
+      const password = document.getElementById('clPassword').value;
+      const server   = document.getElementById('clServer').value;
+      const riskMode = document.getElementById('clRiskMode').value;
+
+      try {
+        const r = await fetch('/api/clients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, broker, login, password, server, riskMode })
+        });
+        if (r.ok) {
+          toast(`<b>⚡ Client Account #${login} Connected:</b> Assigned to ${riskMode} protection.`);
+          e.target.reset();
+          loadAndRenderClients();
+        } else {
+          toast(`Error connecting client account.`);
+        }
+      } catch (err) {
+        toast(`Server error: ${err.message}`);
+      }
+    });
+
     renderWatchlist();
     initBacktestUI();
     renderJournal();
     renderPlaybook();
     renderPureSignalsPage();
+    loadAndRenderClients();
+    pollLiveMt5State();
 
     await loadActiveMarket();
     setTimeout(scanWatchlistOnce, 1800);
     setInterval(scanWatchlistOnce, 75000);
+    setInterval(pollLiveMt5State, 2000);
   }
 
   if (document.readyState === 'loading') {

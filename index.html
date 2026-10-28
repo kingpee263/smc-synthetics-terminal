@@ -68,6 +68,7 @@
     <button class="vt" data-view="weltrade-charts">📊 Weltrade Charts (#43374418)</button>
     <button class="vt" data-view="deriv-signals">⚡ Deriv Signals <span class="sig-count" id="derivSigCount">0</span></button>
     <button class="vt" data-view="weltrade-signals">🔥 Weltrade Signals <span class="sig-count" id="weltradeSigCount">0</span></button>
+    <button class="vt" data-view="clients">👥 Client Accounts &amp; Copier <span class="sig-count" id="clientCountBadge">2</span></button>
     <button class="vt" data-view="backtest">Backtester</button>
     <button class="vt" data-view="journal">Trade Journal</button>
     <button class="vt" data-view="playbook">Book Rules &amp; MT5 Setup</button>
@@ -191,6 +192,38 @@
           </table>
         </div>
       </div>
+
+      <!-- LIVE MT5 TRADES TERMINAL PANEL -->
+      <div class="card" id="terminalLiveMt5Card" style="margin-top:10px; border-left:3px solid #089981;">
+        <div class="card-head" style="margin-bottom:6px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:700; color:#fff;">⚡ Live MT5 Open Positions &amp; Active Orders</span>
+            <span class="st-pill st-live" id="terminalLiveOrdersBadge">0 ACTIVE</span>
+          </div>
+          <span class="small muted" id="terminalLiveOrdersSummary">Streaming live ticks from Deriv (#32398784) &amp; Weltrade (#43374418)</span>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl" id="terminalLiveOrdersTable">
+            <thead>
+              <tr>
+                <th>Broker</th>
+                <th>Ticket #</th>
+                <th>Symbol</th>
+                <th>Type</th>
+                <th>Lot</th>
+                <th>Entry</th>
+                <th>Live Price</th>
+                <th>Stop Loss</th>
+                <th>Take Profit</th>
+                <th>Floating PnL ($)</th>
+                <th>Status</th>
+                <th>Instant Controls</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <aside class="ticket" id="ticket">
@@ -281,6 +314,38 @@
         <div class="signals-grid" id="weltradeSignalsGrid"></div>
       </div>
 
+      <!-- LIVE MT5 ORDERS IN SIGNALS VIEW -->
+      <div class="card" id="signalsLiveMt5Card" style="border-left:3px solid #089981; margin-top:12px; margin-bottom:12px;">
+        <div class="card-head" style="margin-bottom:6px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:700; color:#26a69a;">⚡ Active MT5 Execution Board (Deriv &amp; Weltrade)</span>
+            <span class="st-pill st-live" id="signalsLiveOrdersBadge">0 ACTIVE</span>
+          </div>
+          <span class="muted small" id="signalsLiveOrdersSub">Positions &amp; limits currently running in your MT5 terminals</span>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl" id="signalsLiveOrdersTable">
+            <thead>
+              <tr>
+                <th>Broker &amp; Login</th>
+                <th>Ticket #</th>
+                <th>Kind</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Lot</th>
+                <th>Entry Price</th>
+                <th>Current Price</th>
+                <th>Stop Loss</th>
+                <th>Take Profit</th>
+                <th>Floating PnL ($)</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="card" style="margin-top:10px;">
         <div class="card-head">
           <span>Permanent SMC Auto-Trades Ledger ($40 Account Compounding)</span>
@@ -306,6 +371,38 @@
                 <th>Result (R)</th>
                 <th>Profit / Loss ($)</th>
                 <th>Account Equity</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- LIVE MT5 ORDERS IN SIGNALS VIEW -->
+      <div class="card" id="signalsLiveMt5Card" style="border-left:3px solid #089981; margin-top:12px; margin-bottom:12px;">
+        <div class="card-head" style="margin-bottom:6px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:700; color:#26a69a;">⚡ Active MT5 Execution Board (Deriv &amp; Weltrade)</span>
+            <span class="st-pill st-live" id="signalsLiveOrdersBadge">0 ACTIVE</span>
+          </div>
+          <span class="muted small" id="signalsLiveOrdersSub">Positions &amp; limits currently running in your MT5 terminals</span>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl" id="signalsLiveOrdersTable">
+            <thead>
+              <tr>
+                <th>Broker &amp; Login</th>
+                <th>Ticket #</th>
+                <th>Kind</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Lot</th>
+                <th>Entry Price</th>
+                <th>Current Price</th>
+                <th>Stop Loss</th>
+                <th>Take Profit</th>
+                <th>Floating PnL ($)</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -378,6 +475,142 @@
     </section>
   </main>
 
+  <!-- ============ CLIENT ACCOUNTS & AUTO-COPIER ============ -->
+  <main class="view" id="view-clients">
+    <div class="kpis" id="clientsKpis" style="grid-column: 1 / -1; margin-bottom:12px;"></div>
+
+    <div style="display:grid; grid-template-columns: 360px 1fr; gap:14px; width:100%;">
+      <!-- Connect Form & Token Generator -->
+      <aside class="card" style="padding:14px; background:var(--bg-1);">
+        <div class="card-head" style="margin-bottom:10px;">
+          <span style="font-weight:700; color:#fff; font-size:13px;">Connect User MT5 Account</span>
+          <span class="st-pill st-live">LIVE COPIER</span>
+        </div>
+        <form id="clientAccountForm" style="display:flex; flex-direction:column; gap:10px;">
+          <label class="field">
+            <span>Account Holder Name</span>
+            <input type="text" id="clName" placeholder="e.g. John SMC Client 1" required />
+          </label>
+          <div class="row2">
+            <label class="field">
+              <span>Broker</span>
+              <select id="clBroker">
+                <option value="deriv">Deriv Synthetics</option>
+                <option value="weltrade">Weltrade SyntX</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>MT5 Login #</span>
+              <input type="number" id="clLogin" placeholder="e.g. 32398784" required />
+            </label>
+          </div>
+          <div class="row2">
+            <label class="field">
+              <span>MT5 Password</span>
+              <input type="password" id="clPassword" placeholder="Investor / Master" required />
+            </label>
+            <label class="field">
+              <span>Broker Server</span>
+              <select id="clServer">
+                <option value="Deriv-Demo">Deriv-Demo</option>
+                <option value="Deriv-Server">Deriv-Server</option>
+                <option value="Deriv-Server-02">Deriv-Server-02</option>
+                <option value="Weltrade-Demo">Weltrade-Demo</option>
+                <option value="Weltrade-Real">Weltrade-Real</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span>Capital Protection Mode</span>
+            <select id="clRiskMode">
+              <option value="BALANCE_TIERED">Balance-Tiered Shield (Auto-block heavy min-lots)</option>
+              <option value="MICRO_SEED">Micro Seed ($10–$99 · 0.75% Risk · 1 Trade Max)</option>
+              <option value="GROWTH_STARTER">Growth Starter ($100–$499 · 0.90% Risk · 2 Trades)</option>
+              <option value="PRO_COMPOUNDER">Pro Compounder ($500+ · 1.00%–1.35% Risk)</option>
+            </select>
+          </label>
+          <div style="background:var(--bg-0); padding:8px; border-radius:4px; font-size:11px; line-height:1.4; color:var(--text-dim); border:1px solid var(--border);">
+            🛡 <b>Micro-Capital Shield Active:</b> Small accounts ($10–$100) are protected by automatically blocking wide-stop indices and strictly executing micro-safe symbols with max 1.5% risk cap.
+          </div>
+          <button class="btn primary block" type="submit" style="margin-top:4px;">
+            ⚡ Connect Account to SMC Auto-Copier
+          </button>
+        </form>
+
+        <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border);">
+          <div style="font-weight:700; font-size:12px; color:#fff; margin-bottom:6px;">Download Client EA for Remote VPS / MT5</div>
+          <p class="muted small" style="margin-bottom:8px;">Users running MT5 on their own PC or VPS can attach the EA with their generated Client Token to sync trades automatically.</p>
+          <a href="mt5/SMC_Auto_Bridge.ex5" download class="btn ghost small block" style="text-align:center; text-decoration:none;">
+            ⬇ Download SMC_Auto_Bridge.ex5 (Client Mode)
+          </a>
+        </div>
+      </aside>
+
+      <!-- Accounts Table & Balance-Tier Matrix -->
+      <section style="display:flex; flex-direction:column; gap:12px;">
+        <!-- Balance-Tier Protection Matrix -->
+        <div class="card" style="padding:12px; background:var(--bg-1);">
+          <div class="card-head" style="margin-bottom:8px;">
+            <span style="font-weight:700; color:#38bdf8; font-size:12.5px;">Institutional Account-Raising &amp; Capital Protection Matrix</span>
+            <span class="small muted">Rules enforced per account balance</span>
+          </div>
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:8px;">
+            <div style="background:var(--bg-0); padding:8px 10px; border-radius:4px; border-left:3px solid #38bdf8;">
+              <div style="font-weight:700; color:#38bdf8; font-size:11.5px;">Tier 1: Micro Seed ($10–$99)</div>
+              <div class="small muted" style="margin-top:3px;">Risk: <b>0.75% (Cap 1.5%)</b> · Max Trades: <b>1</b></div>
+              <div class="small muted">Daily Goal: <b>+4.5% Lock</b> · DD Breaker: <b>-2.5%</b></div>
+              <div class="small" style="color:#26a69a; margin-top:3px;">Allowed: Micro-safe symbols only (V10, V25, FX Vol, FlipX, Step)</div>
+            </div>
+            <div style="background:var(--bg-0); padding:8px 10px; border-radius:4px; border-left:3px solid #26a69a;">
+              <div style="font-weight:700; color:#26a69a; font-size:11.5px;">Tier 2: Growth Starter ($100–$499)</div>
+              <div class="small muted" style="margin-top:3px;">Risk: <b>0.90% (Cap 1.85%)</b> · Max Trades: <b>2</b></div>
+              <div class="small muted">Daily Goal: <b>+5.0% Lock</b> · DD Breaker: <b>-3.0%</b></div>
+              <div class="small" style="color:#26a69a; margin-top:3px;">Allowed: Deriv Synthetics &amp; Weltrade SyntX (blocks 1800/2000)</div>
+            </div>
+            <div style="background:var(--bg-0); padding:8px 10px; border-radius:4px; border-left:3px solid #fbbf24;">
+              <div style="font-weight:700; color:#fbbf24; font-size:11.5px;">Tier 3: Institutional ($500–$2,499)</div>
+              <div class="small muted" style="margin-top:3px;">Risk: <b>1.00% (Cap 2.2%)</b> · Max Trades: <b>3</b></div>
+              <div class="small muted">Daily Goal: <b>+5.5% Lock</b> · DD Breaker: <b>-3.5%</b></div>
+              <div class="small" style="color:#fbbf24; margin-top:3px;">Allowed: Full Deriv 33 &amp; Weltrade 35 Catalog</div>
+            </div>
+            <div style="background:var(--bg-0); padding:8px 10px; border-radius:4px; border-left:3px solid #a855f7;">
+              <div style="font-weight:700; color:#a855f7; font-size:11.5px;">Tier 4: Pro / Prop ($2,500+)</div>
+              <div class="small muted" style="margin-top:3px;">Risk: <b>1.00%–1.35%</b> · Max Trades: <b>3</b></div>
+              <div class="small muted">Daily Goal: <b>+6.5% Lock</b> · DD Breaker: <b>-4.0%</b></div>
+              <div class="small" style="color:#a855f7; margin-top:3px;">Adaptive Streak &amp; Spike Sniper Compounding Active</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connected Accounts Table -->
+        <div class="card" style="padding:12px; background:var(--bg-1);">
+          <div class="card-head">
+            <span style="font-weight:700; color:#fff;">Connected Client Accounts &amp; Copier Status</span>
+            <span class="muted small" id="clientsTableSub">Live accounts being traded with pure A+ confluences</span>
+          </div>
+          <div class="table-wrap">
+            <table class="tbl" id="clientsTable">
+              <thead>
+                <tr>
+                  <th>Account / Holder</th>
+                  <th>Broker &amp; Server</th>
+                  <th>Balance / Equity</th>
+                  <th>Growth Tier</th>
+                  <th>Daily Gain / DD</th>
+                  <th>Active Trades</th>
+                  <th>Copier Status</th>
+                  <th>Client Token</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
   <!-- ============ JOURNAL ============ -->
   <main class="view" id="view-journal">
     <aside class="card j-form">
@@ -410,8 +643,40 @@
     </aside>
     <section class="j-list">
       <div class="kpis" id="jKpis"></div>
+
+      <!-- LIVE MT5 TRADES IN JOURNAL -->
+      <div class="card" id="journalLiveMt5Card" style="margin-bottom:12px; border-left:3px solid #38bdf8;">
+        <div class="card-head" style="margin-bottom:6px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:700; color:#38bdf8;">Active MT5 Positions in Market</span>
+            <span class="st-pill st-live" id="journalLiveBadge">0 ACTIVE</span>
+          </div>
+          <span class="small muted">Open trades streaming directly from Deriv &amp; Weltrade MT5</span>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl" id="journalLiveTable">
+            <thead>
+              <tr>
+                <th>Broker</th>
+                <th>Ticket</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Lot</th>
+                <th>Entry Price</th>
+                <th>Current Price</th>
+                <th>Stop Loss</th>
+                <th>Take Profit</th>
+                <th>Floating PnL ($)</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="card">
-        <div class="card-head"><span>Execution Ledger</span><span class="muted small">Track Ch. 9 pitfall avoidance and R expectancy</span></div>
+        <div class="card-head"><span>Execution Ledger (Permanently Logged SMC Trades)</span><span class="muted small">Track Ch. 9 pitfall avoidance and R expectancy</span></div>
         <div class="table-wrap tall">
           <table class="tbl" id="jTable">
             <thead><tr><th>Date (CAT)</th><th>Symbol</th><th>Pair</th><th>Side</th><th>Model</th><th>Trail</th><th>R</th><th>Ch. 9 Review</th><th>Notes</th><th></th></tr></thead>
