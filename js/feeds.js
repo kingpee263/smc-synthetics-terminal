@@ -41,34 +41,47 @@
     // 4. Deriv Range Break & DEX Indices
     { id: 'RDBULL', name: 'Range Break 100 Index', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'Range Break 100 Index', derivSymbol: 'RDBULL', profile: 'synthetic', dec: 2 },
     { id: 'RDBEAR', name: 'Range Break 200 Index', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'Range Break 200 Index', derivSymbol: 'RDBEAR', profile: 'synthetic', dec: 2 },
-    { id: 'DEX600UP', name: 'DEX 600 UP', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'DEX 600 UP', derivSymbol: 'DEX600UP', profile: 'synthetic', spike: 'up', dec: 2 },
-    { id: 'DEX600DN', name: 'DEX 600 DOWN', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'DEX 600 DOWN', derivSymbol: 'DEX600DN', profile: 'synthetic', spike: 'down', dec: 2 },
-    { id: 'DEX900UP', name: 'DEX 900 UP', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'DEX 900 UP', derivSymbol: 'DEX900UP', profile: 'synthetic', spike: 'up', dec: 2 },
-    { id: 'DEX900DN', name: 'DEX 900 DOWN', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'DEX 900 DOWN', derivSymbol: 'DEX900DN', profile: 'synthetic', spike: 'down', dec: 2 },
+    { id: 'DEX600UP', name: 'DEX 600 UP Index', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'DEX 600 UP Index', derivSymbol: 'DEX600UP', profile: 'synthetic', spike: 'up', dec: 2 },
+    { id: 'DEX600DN', name: 'DEX 600 DOWN Index', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'DEX 600 DOWN Index', derivSymbol: 'DEX600DN', profile: 'synthetic', spike: 'down', dec: 2 },
+    { id: 'DEX900UP', name: 'DEX 900 UP Index', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'DEX 900 UP Index', derivSymbol: 'DEX900UP', profile: 'synthetic', spike: 'up', dec: 2 },
+    { id: 'DEX900DN', name: 'DEX 900 DOWN Index', group: 'Deriv MT5 Range Break & DEX', cat: 'deriv_dex', feed: 'mt5', mt5Symbol: 'DEX 900 DOWN Index', derivSymbol: 'DEX900DN', profile: 'synthetic', spike: 'down', dec: 2 },
 
     // 5. Weltrade SyntX Indices (Streamed from MT5 Weltrade-Demo #43374418)
-    { id: 'mt5:FX Vol 20', name: 'FX Vol 20', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 20', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:FX Vol 40', name: 'FX Vol 40', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 40', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:FX Vol 60', name: 'FX Vol 60', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 60', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:FX Vol 80', name: 'FX Vol 80', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 80', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:FX Vol 99', name: 'FX Vol 99', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 99', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:SFX Vol 20', name: 'SFX Vol 20', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 20', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:SFX Vol 40', name: 'SFX Vol 40', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 40', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:SFX Vol 60', name: 'SFX Vol 60', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 60', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:SFX Vol 80', name: 'SFX Vol 80', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 80', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:SFX Vol 99', name: 'SFX Vol 99', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 99', profile: 'synthetic', dec: 4 },
-    { id: 'mt5:PainX 400', name: 'PainX 400 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 400', profile: 'synthetic', spike: 'down', dec: 2 },
-    { id: 'mt5:GainX 400', name: 'GainX 400 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 400', profile: 'synthetic', spike: 'up', dec: 2 },
-    { id: 'mt5:PainX 600', name: 'PainX 600 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 600', profile: 'synthetic', spike: 'down', dec: 2 },
-    { id: 'mt5:GainX 600', name: 'GainX 600 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 600', profile: 'synthetic', spike: 'up', dec: 2 },
-    { id: 'mt5:PainX 800', name: 'PainX 800 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 800', profile: 'synthetic', spike: 'down', dec: 2 },
-    { id: 'mt5:GainX 800', name: 'GainX 800 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 800', profile: 'synthetic', spike: 'up', dec: 2 },
-    { id: 'mt5:PainX 999', name: 'PainX 999 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 999', profile: 'synthetic', spike: 'down', dec: 2 },
-    { id: 'mt5:GainX 999', name: 'GainX 999 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 999', profile: 'synthetic', spike: 'up', dec: 2 },
-    { id: 'mt5:PainX 1200', name: 'PainX 1200 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 1200', profile: 'synthetic', spike: 'down', dec: 2 },
-    { id: 'mt5:GainX 1200', name: 'GainX 1200 Index', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 1200', profile: 'synthetic', spike: 'up', dec: 2 },
-    { id: 'mt5:FlipX 600', name: 'FlipX / SwitchX 600', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SwitchX 600', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:FX Vol 20', name: 'FX Vol 20', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 20', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:FX Vol 40', name: 'FX Vol 40', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 40', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:FX Vol 60', name: 'FX Vol 60', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 60', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:FX Vol 80', name: 'FX Vol 80', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 80', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:FX Vol 99', name: 'FX Vol 99', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FX Vol 99', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:SFX Vol 20', name: 'SFX Vol 20', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 20', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:SFX Vol 40', name: 'SFX Vol 40', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 40', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:SFX Vol 60', name: 'SFX Vol 60', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 60', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:SFX Vol 80', name: 'SFX Vol 80', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 80', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:SFX Vol 99', name: 'SFX Vol 99', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SFX Vol 99', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:PainX 400', name: 'PainX 400', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 400', profile: 'synthetic', spike: 'down', dec: 2 },
+    { id: 'mt5:GainX 400', name: 'GainX 400', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 400', profile: 'synthetic', spike: 'up', dec: 2 },
+    { id: 'mt5:PainX 600', name: 'PainX 600', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 600', profile: 'synthetic', spike: 'down', dec: 2 },
+    { id: 'mt5:GainX 600', name: 'GainX 600', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 600', profile: 'synthetic', spike: 'up', dec: 2 },
+    { id: 'mt5:PainX 800', name: 'PainX 800', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 800', profile: 'synthetic', spike: 'down', dec: 2 },
+    { id: 'mt5:GainX 800', name: 'GainX 800', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 800', profile: 'synthetic', spike: 'up', dec: 2 },
+    { id: 'mt5:PainX 999', name: 'PainX 999', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 999', profile: 'synthetic', spike: 'down', dec: 2 },
+    { id: 'mt5:GainX 999', name: 'GainX 999', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 999', profile: 'synthetic', spike: 'up', dec: 2 },
+    { id: 'mt5:PainX 1200', name: 'PainX 1200', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'PainX 1200', profile: 'synthetic', spike: 'down', dec: 2 },
+    { id: 'mt5:GainX 1200', name: 'GainX 1200', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'GainX 1200', profile: 'synthetic', spike: 'up', dec: 2 },
+    { id: 'mt5:FlipX 1', name: 'FlipX 1', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FlipX 1', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:FlipX 2', name: 'FlipX 2', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FlipX 2', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:FlipX 3', name: 'FlipX 3', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FlipX 3', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:FlipX 4', name: 'FlipX 4', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FlipX 4', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:FlipX 5', name: 'FlipX 5', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'FlipX 5', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:SwitchX 600', name: 'SwitchX 600', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SwitchX 600', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:SwitchX 1200', name: 'SwitchX 1200', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SwitchX 1200', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:SwitchX 1800', name: 'SwitchX 1800', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'SwitchX 1800', profile: 'synthetic', dec: 2 },
     { id: 'mt5:BreakX 600', name: 'BreakX 600', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'BreakX 600', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:BreakX 1200', name: 'BreakX 1200', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'BreakX 1200', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:BreakX 1800', name: 'BreakX 1800', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'BreakX 1800', profile: 'synthetic', dec: 2 },
+    { id: 'mt5:MAX PainX 1000', name: 'MAX PainX 1000', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'MAX PainX 1000', profile: 'synthetic', spike: 'down', dec: 2 },
+    { id: 'mt5:MAX GainX 1000', name: 'MAX GainX 1000', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'MAX GainX 1000', profile: 'synthetic', spike: 'up', dec: 2 },
+    { id: 'mt5:MAX PainX 2000', name: 'MAX PainX 2000', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'MAX PainX 2000', profile: 'synthetic', spike: 'down', dec: 2 },
+    { id: 'mt5:MAX GainX 2000', name: 'MAX GainX 2000', group: 'Weltrade MT5 SyntX', cat: 'weltrade', broker: 'weltrade', feed: 'mt5', mt5Symbol: 'MAX GainX 2000', profile: 'synthetic', spike: 'up', dec: 2 },
 
     // 6. Real Forex & Metals from MT5
     { id: 'frxEURUSD', name: 'EUR/USD', group: 'MT5 Forex & Metals', cat: 'forex', feed: 'mt5', mt5Symbol: 'EURUSD', derivSymbol: 'frxEURUSD', profile: 'forex', dec: 5 },
@@ -313,9 +326,10 @@
     bridgeUrl: 'http://localhost:8095', // Connects directly to local MT5 bridge even if opened from GitHub Pages
     bridgeOnline: false,
     symbols: [],
+    quotes: {},
     accountState: null,
     derivAccount: { broker: 'deriv', login: 32398784, server: 'Deriv-Demo', balance: 9363.52, equity: 9363.81, orders: [] },
-    weltradeAccount: { broker: 'weltrade', login: 43374418, server: 'Weltrade-Demo', balance: 9339.86, equity: 9366.36, orders: [] },
+    weltradeAccount: { broker: 'weltrade', login: 43374418, server: 'Weltrade-Demo', balance: 500.00, equity: 500.00, orders: [] },
 
     getBaseUrl() {
       if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
@@ -329,6 +343,31 @@
         return this.weltradeAccount || this.accountState;
       }
       return this.derivAccount || this.accountState;
+    },
+
+    async fetchQuotes() {
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 1500);
+        const r = await fetch(`${this.getBaseUrl()}/api/mt5/quotes`, { cache: 'no-store', signal: ctrl.signal });
+        clearTimeout(tid);
+        if (r.ok) {
+          const data = await r.json();
+          const merged = { ...(data.deriv || {}), ...(data.weltrade || {}) };
+          this.quotes = merged;
+          for (const m of markets.values()) {
+            const sym = m.mt5Symbol || m.id.replace('mt5:', '') || m.name;
+            const q = merged[sym];
+            if (q && Number.isFinite(+q.bid) && +q.bid > 0) {
+              m.spot = +q.bid;
+              m.ask = +q.ask;
+              if (Number.isFinite(+q.digits)) m.dec = +q.digits;
+            }
+          }
+          return merged;
+        }
+      } catch (e) {}
+      return this.quotes;
     },
 
     async fetchAccountState() {
@@ -368,7 +407,7 @@
 
     async refreshSymbols() {
       try {
-        await this.fetchAccountState();
+        await Promise.all([this.fetchAccountState(), this.fetchQuotes()]);
         const ctrl = new AbortController();
         const tid = setTimeout(() => ctrl.abort(), 1800);
         const r = await fetch(`${this.getBaseUrl()}/api/mt5/symbols`, { cache: 'no-store', signal: ctrl.signal });
@@ -384,6 +423,7 @@
             if (!exists) {
               const up = sName.toUpperCase();
               const spike = (up.includes('PAIN') || up.includes('CRASH')) ? 'down' : ((up.includes('GAIN') || up.includes('BOOM')) ? 'up' : undefined);
+              const q = this.quotes[sName];
               markets.set(id, {
                 id,
                 name: sName,
@@ -394,7 +434,8 @@
                 mt5Symbol: sName,
                 profile: 'synthetic',
                 spike,
-                dec: up.includes('VOL') ? 4 : 2
+                spot: q ? +q.bid : undefined,
+                dec: q && Number.isFinite(+q.digits) ? +q.digits : 2
               });
             }
           }
@@ -413,7 +454,7 @@
       const symbol = market.mt5Symbol || market.id.replace('mt5:', '') || market.name;
       try {
         const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 2000);
+        const tid = setTimeout(() => ctrl.abort(), 4500);
         const r = await fetch(`${this.getBaseUrl()}/api/mt5/candles?symbol=${encodeURIComponent(symbol)}&tf=${MT5_TF[gran] || gran}&kind=${kind}`, { cache: 'no-store', signal: ctrl.signal });
         clearTimeout(tid);
         if (r.ok) {
@@ -426,7 +467,16 @@
             market.liveSource = isWt
               ? `WELTRADE MT5 LIVE (#${acc?.login || '43374418'})`
               : `DERIV MT5 LIVE (#${acc?.login || '32398784'})`;
-            return rows.map(a => ({ time: a[0] * 1000, open: +a[1], high: +a[2], low: +a[3], close: +a[4] }));
+            const mapped = rows.map(a => ({ time: a[0] * 1000, open: +a[1], high: +a[2], low: +a[3], close: +a[4] }));
+            const q = this.quotes[symbol];
+            if (q && Number.isFinite(+q.bid) && +q.bid > 0 && mapped.length) {
+              const last = mapped[mapped.length - 1];
+              last.close = +q.bid;
+              if (+q.bid > last.high) last.high = +q.bid;
+              if (+q.bid < last.low) last.low = +q.bid;
+              if (Number.isFinite(+q.digits)) market.dec = +q.digits;
+            }
+            return mapped;
           }
         }
       } catch (e) {}
@@ -436,10 +486,11 @@
     subscribe(market, gran, cb) {
       const pollTimer = setInterval(async () => {
         try {
+          await this.fetchQuotes();
           const rows = await this.candles(market, gran, 'live', 5);
           if (rows.length) cb(rows[rows.length - 1]);
         } catch (e) {}
-      }, 1500);
+      }, 1000);
       return () => clearInterval(pollTimer);
     }
   };
@@ -466,21 +517,22 @@
     const have = cache.get(key);
     let data = null;
 
-    // 1. ALWAYS query your Windows MT5 App first
+    // 1. ALWAYS query your Windows MT5 App first (and replace cache directly with authoritative MT5 bars)
     try {
+      await mt5.fetchQuotes();
       const full = await mt5.candles(market, gran, 'full', count);
       if (Array.isArray(full) && full.length) {
-        data = have ? merge(have, full) : full;
+        data = full;
         market.spot = data[data.length - 1].close;
       }
     } catch (e) {}
 
-    // 2. If MT5 doesn't have this symbol cached yet and it's a Deriv symbol, query real Deriv WebSocket
-    if ((!data || !data.length) && market.derivSymbol) {
+    // 2. Only fall back to Deriv WebSocket if local MT5 bridge is offline (e.g. remote GitHub Pages)
+    if ((!data || !data.length) && !mt5.bridgeOnline && market.derivSymbol) {
       try {
         const wsData = await deriv.history(market.derivSymbol, gran, count);
         if (Array.isArray(wsData) && wsData.length) {
-          data = have ? merge(have, wsData) : wsData;
+          data = wsData;
           market.spot = data[data.length - 1].close;
           market.liveSource = 'DERIV OFFICIAL WS LIVE';
         }
@@ -489,7 +541,7 @@
 
     if (!data || !data.length) {
       if (have && have.length) return have.slice(-count);
-      throw new Error(`Symbol ${market.mt5Symbol || market.name} is not active on your current MT5 broker login (${mt5.accountState?.server || 'Deriv-Demo'})`);
+      throw new Error(`Symbol ${market.mt5Symbol || market.name} is syncing from MT5 — click Reload in 1 second.`);
     }
 
     cache.set(key, data);
@@ -536,7 +588,8 @@
     return { market, pair, recipe, bucketFn, htf, ltf, smtHtf: null, smtMarket: null, loadedAt: Date.now() };
   }
 
-  function decimalsFor(candles) {
+  function decimalsFor(candles, market) {
+    if (market && Number.isFinite(market.dec)) return market.dec;
     const sample = (candles || []).slice(-30).map(c => c.close);
     let d = 0;
     for (const v of sample) {

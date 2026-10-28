@@ -682,8 +682,8 @@
         const ml = ws?.ml;
         const info = s ? (E.STATE_INFO[s.state] || { label: s.state, tone: 'muted' }) : { label: 'Live', tone: 'muted' };
         const spec = F.MARKET_SPECS ? F.MARKET_SPECS[m.id] : null;
-        const rawPrice = ws?.price ?? m.spot ?? spec?.base;
-        const dec = ws?.decimals || spec?.dec || 2;
+        const rawPrice = m.spot ?? ws?.price ?? spec?.base;
+        const dec = m.dec ?? ws?.decimals ?? spec?.dec ?? 2;
         const priceTxt = rawPrice != null ? Number(rawPrice).toFixed(dec) : '—';
         const dirTxt = s?.dir
           ? `${s.dir} · ${s.structType || 'BOS'} · ${s.grade || ''} ${ml ? `· ${ml.probTP1}%` : ''}`
@@ -960,7 +960,7 @@
   function renderTicketAndTable() {
     if (!state.series || !state.evalRes) return;
     const { market, pair, ltf } = state.series;
-    const dec = F.decimalsFor(ltf);
+    const dec = F.decimalsFor(ltf, market);
     const f = v => v != null && isFinite(v) ? v.toFixed(dec) : '—';
     const setup = state.selectedSetup || state.evalRes.primary;
     const mlPred = ML.predict(state.series, setup);
@@ -1402,7 +1402,7 @@
       state.evalRes = evalRes;
       state.selectedSetup = evalRes.primary;
 
-      const dec = F.decimalsFor(series.ltf);
+      const dec = F.decimalsFor(series.ltf, market);
       const mlPred = ML.predict(series, evalRes.primary);
       state.watchStates.set(market.id, {
         market,
@@ -1463,9 +1463,20 @@
           htfChart.update(newHtf);
         }
 
-        updateQuoteHeader(market, state.series.pair, ltf, dec);
+        const liveDec = F.decimalsFor(ltf, market);
+        updateQuoteHeader(market, state.series.pair, ltf, liveDec);
         const ws = state.watchStates.get(market.id);
         if (ws) ws.price = c.close;
+
+        // Live-update all watchlist sidebar prices from 1-second MT5 quotes
+        document.querySelectorAll('#wlBody .wl-item').forEach(el => {
+          const mid = el.dataset.mid;
+          const mObj = F.markets.get(mid);
+          if (mObj && Number.isFinite(mObj.spot)) {
+            const pSpan = el.querySelector('.wl-right .mono');
+            if (pSpan) pSpan.textContent = Number(mObj.spot).toFixed(mObj.dec ?? 2);
+          }
+        });
 
         if (barClosed) {
           const allS = E.findAllSetups(state.series, state.engineOpts);

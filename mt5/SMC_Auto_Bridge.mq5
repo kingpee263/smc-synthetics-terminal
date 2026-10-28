@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                              SMC_Auto_Bridge.mq5 |
 //|     Frank Miller Smart Money Concepts (SMC) Live MT5 Auto-Bridge |
-//|   Pure A+ Autonomous Execution & Institutional Risk Manager v4.0 |
+//|   Pure A+ Autonomous Execution & Institutional Risk Manager v4.2 |
 //+------------------------------------------------------------------+
 #property copyright "SMC Desk — Frank Miller Smart Money Concepts"
-#property version   "4.10"
+#property version   "4.20"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -12,7 +12,6 @@
 #include <Trade\PositionInfo.mqh>
 
 input string InpServerUrl         = "http://localhost:8095"; // Local SMC Desk Server URL
-input string InpSymbols           = "Volatility 75 (1s) Index,Volatility 75 Index,Volatility 100 (1s) Index,Volatility 100 Index,Volatility 50 (1s) Index,Volatility 50 Index,Volatility 25 (1s) Index,Volatility 25 Index,Volatility 15 (1s) Index,Volatility 10 (1s) Index,Volatility 10 Index,Boom 1000 Index,Crash 1000 Index,Boom 500 Index,Crash 500 Index,Boom 300 Index,Crash 300 Index,Step Index,Jump 10 Index,Jump 25 Index,Jump 50 Index,Jump 75 Index,Jump 100 Index,Range Break 100 Index,Range Break 200 Index,DEX 600 UP,DEX 600 DOWN,DEX 900 UP,DEX 900 DOWN,PainX 400,GainX 400,PainX 600,GainX 600,PainX 800,GainX 800,PainX 999,GainX 999,PainX 1200,GainX 1200,FX Vol 20,FX Vol 40,FX Vol 60,FX Vol 80,FX Vol 99,SFX Vol 20,SFX Vol 40,SFX Vol 60,SFX Vol 80,SFX Vol 99,SwitchX 600,BreakX 600,XAUUSD,EURUSD,GBPUSD"; // Monitored Symbols
 input int    InpFullBars          = 500;      // Historical bars exported every sync
 input long   InpMagicNumber       = 20260401; // Magic Number for SMC Auto-Trades
 input bool   InpEnableAutoExe     = true;     // Enable Pure A+ Auto-Trading & X1-X3 Trailing
@@ -25,17 +24,99 @@ input double InpMinRR             = 2.50;     // Minimum TP2 Reward-to-Risk Rati
 input int    InpCooldownMinutes   = 60;       // Per-Symbol Cooldown Between Trades (Min)
 input int    InpPendingExpiryMin  = 180;      // Expire Unfilled Pending Limit Orders (Min)
 
+// Full Broker Symbol Arrays (immune to MQL5 255-char input string truncation)
+string DERIV_SYMS[] = {
+   "Volatility 15 (1s) Index", "Volatility 75 (1s) Index", "Volatility 75 Index",
+   "Volatility 10 (1s) Index", "Volatility 25 (1s) Index", "Volatility 50 (1s) Index",
+   "Volatility 100 (1s) Index", "Volatility 10 Index", "Volatility 25 Index",
+   "Volatility 50 Index", "Volatility 100 Index", "Boom 1000 Index",
+   "Crash 1000 Index", "Boom 500 Index", "Crash 500 Index",
+   "Boom 300 Index", "Crash 300 Index", "Step Index",
+   "Jump 10 Index", "Jump 25 Index", "Jump 50 Index",
+   "Jump 75 Index", "Jump 100 Index", "Range Break 100 Index",
+   "Range Break 200 Index", "DEX 600 UP Index", "DEX 600 DOWN Index",
+   "DEX 900 UP Index", "DEX 900 DOWN Index", "EURUSD",
+   "GBPUSD", "USDJPY", "XAUUSD"
+};
+
+string WELTRADE_SYMS[] = {
+   "FX Vol 20", "FX Vol 40", "FX Vol 60", "FX Vol 80", "FX Vol 99",
+   "SFX Vol 20", "SFX Vol 40", "SFX Vol 60", "SFX Vol 80", "SFX Vol 99",
+   "PainX 400", "GainX 400", "PainX 600", "GainX 600", "PainX 800",
+   "GainX 800", "PainX 999", "GainX 999", "PainX 1200", "GainX 1200",
+   "FlipX 1", "FlipX 2", "FlipX 3", "FlipX 4", "FlipX 5",
+   "SwitchX 600", "SwitchX 1200", "SwitchX 1800",
+   "BreakX 600", "BreakX 1200", "BreakX 1800",
+   "MAX PainX 1000", "MAX GainX 1000", "MAX PainX 2000", "MAX GainX 2000"
+};
+
 CTrade        g_trade;
 COrderInfo    g_order;
 CPositionInfo g_pos;
 
 datetime g_lastLog        = 0;
-datetime g_lastAPlusScan  = 0;
-datetime g_lastCandleSync = 0;
-bool     g_initSyncDone   = false;
 string   g_lastCmdId      = "";
 double   g_dayStartEquity = 0.0;
 int      g_currentDay     = -1;
+int      g_rrCursor       = 0;
+string   g_brokerSyms[];
+int      g_brokerSymCount = 0;
+
+//+------------------------------------------------------------------+
+//| Detect whether this MT5 instance is connected to Weltrade        |
+//+------------------------------------------------------------------+
+bool IsWeltradeBroker()
+{
+   string srv = AccountInfoString(ACCOUNT_SERVER);
+   string cmp = AccountInfoString(ACCOUNT_COMPANY);
+   StringToUpper(srv);
+   StringToUpper(cmp);
+   if(StringFind(srv, "WELTRADE") >= 0 || StringFind(cmp, "WELTRADE") >= 0 || AccountInfoInteger(ACCOUNT_LOGIN) == 43374418)
+      return true;
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Build Validated Symbol List for Current Broker                   |
+//+------------------------------------------------------------------+
+void InitBrokerSymbols()
+{
+   bool isWt = IsWeltradeBroker();
+   int n = isWt ? ArraySize(WELTRADE_SYMS) : ArraySize(DERIV_SYMS);
+   ArrayResize(g_brokerSyms, 0);
+   g_brokerSymCount = 0;
+
+   for(int i = 0; i < n; i++)
+   {
+      string s = isWt ? WELTRADE_SYMS[i] : DERIV_SYMS[i];
+      StringTrimLeft(s);
+      StringTrimRight(s);
+      if(StringLen(s) == 0) continue;
+
+      if(SymbolSelect(s, true))
+      {
+         ArrayResize(g_brokerSyms, g_brokerSymCount + 1);
+         g_brokerSyms[g_brokerSymCount] = s;
+         g_brokerSymCount++;
+      }
+   }
+
+   // Export clean catalog file immediately
+   string catJson = "[";
+   for(int i = 0; i < g_brokerSymCount; i++)
+   {
+      if(i > 0) catJson += ",";
+      catJson += "\"" + g_brokerSyms[i] + "\"";
+   }
+   catJson += "]";
+   string catFile = IsWeltradeBroker() ? "smc_bridge\\catalog_weltrade.json" : "smc_bridge\\catalog_deriv.json";
+   int fhCat = FileOpen(catFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+   if(fhCat != INVALID_HANDLE)
+   {
+      FileWriteString(fhCat, catJson);
+      FileClose(fhCat);
+   }
+}
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -50,15 +131,14 @@ int OnInit()
    TimeCurrent(dt);
    g_currentDay = dt.day_of_year;
 
-   EventSetTimer(2);
+   InitBrokerSymbols();
+   EventSetTimer(1); // 1-second real-time tick & active chart sync
+
    Print("=================================================================");
-   Print("SMC_Auto_Bridge v4.00 (PURE A+ ONLY + RISK MANAGER) initialized");
-   Print("Account #", AccountInfoInteger(ACCOUNT_LOGIN), " (", AccountInfoString(ACCOUNT_SERVER), ")");
+   Print("SMC_Auto_Bridge v4.20 (REAL-TIME 1S SYNC + PURE A+ RISK GUARD) initialized");
+   Print("Account #", AccountInfoInteger(ACCOUNT_LOGIN), " (", AccountInfoString(ACCOUNT_SERVER), ") | Symbols=", g_brokerSymCount);
    Print("Balance: $", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2),
          " | Equity: $", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2));
-   Print("Risk Rules: ", DoubleToString(InpRiskPercent, 2), "% Risk/Trade | Max ",
-         InpMaxOpenTrades, " Open Trades | Max Daily DD ", DoubleToString(InpMaxDailyLossPct, 1),
-         "% | Min R:R 1:", DoubleToString(InpMinRR, 1));
    Print("=================================================================");
    return(INIT_SUCCEEDED);
 }
@@ -66,7 +146,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
-   Print("SMC_Auto_Bridge v4.00 stopped.");
+   Print("SMC_Auto_Bridge v4.20 stopped.");
 }
 
 //+------------------------------------------------------------------+
@@ -120,10 +200,8 @@ bool IsCounterSpikeTrade(const string sym, bool isBuy)
 {
    string up = sym;
    StringToUpper(up);
-   // Boom & GainX spike UP -> never auto-SELL against upward spikes
    if((StringFind(up, "BOOM") >= 0 || StringFind(up, "GAINX") >= 0) && !isBuy)
       return true;
-   // Crash & PainX spike DOWN -> never auto-BUY against downward spikes
    if((StringFind(up, "CRASH") >= 0 || StringFind(up, "PAINX") >= 0) && isBuy)
       return true;
    return false;
@@ -134,65 +212,66 @@ bool IsCounterSpikeTrade(const string sym, bool isBuy)
 //+------------------------------------------------------------------+
 bool CanOpenNewTrade(const string sym, const string comment, string &outReason)
 {
-   // 1. Strict Pure A+ Filter: Block any regular trade that is not explicitly A+
    if(StringFind(comment, "APLUS") < 0 && StringFind(comment, "A+") < 0)
    {
       outReason = "Regular Trade Blocked (Requires Pure A+ 7/7 Confluence)";
       return false;
    }
 
-   // 2. Update Daily High-Water / Day Start Equity & Check Daily Drawdown Circuit Breaker
    MqlDateTime dt;
    TimeCurrent(dt);
-   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
-   if(dt.day_of_year != g_currentDay || g_dayStartEquity <= 0.0)
+   if(dt.day_of_year != g_currentDay)
    {
       g_currentDay = dt.day_of_year;
-      g_dayStartEquity = MathMax(bal, eq);
+      g_dayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
    }
-   if(g_dayStartEquity > 0.0)
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double refCap = MathMax(g_dayStartEquity, balance);
+   if(refCap > 0.0)
    {
-      double ddPct = ((g_dayStartEquity - eq) / g_dayStartEquity) * 100.0;
+      double ddPct = ((refCap - equity) / refCap) * 100.0;
       if(ddPct >= InpMaxDailyLossPct)
       {
-         outReason = StringFormat("Daily Drawdown Circuit Breaker Active (%.2f%% >= %.2f%%)", ddPct, InpMaxDailyLossPct);
+         outReason = StringFormat("Daily Drawdown Breaker Active (%.2f%% >= %.2f%%)", ddPct, InpMaxDailyLossPct);
          return false;
       }
    }
 
-   // 3. Single Exposure Per Symbol & Max Concurrent Open/Pending Trades
-   int activeTotal = 0;
+   int openCount = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong t = PositionGetTicket(i);
       if(t == 0) continue;
-      activeTotal++;
-      if(PositionGetString(POSITION_SYMBOL) == sym)
+      string pSym = PositionGetString(POSITION_SYMBOL);
+      if(pSym == sym)
       {
-         outReason = "Symbol already has an open position (" + sym + ")";
+         outReason = "Position already open on " + sym;
          return false;
       }
+      openCount++;
    }
-   for(int i = OrdersTotal() - 1; i >= 0; i--)
+
+   for(int j = OrdersTotal() - 1; j >= 0; j--)
    {
-      ulong t = OrderGetTicket(i);
-      if(t == 0) continue;
-      activeTotal++;
-      if(OrderGetString(ORDER_SYMBOL) == sym)
+      ulong ot = OrderGetTicket(j);
+      if(ot == 0) continue;
+      string oSym = OrderGetString(ORDER_SYMBOL);
+      if(oSym == sym)
       {
-         outReason = "Symbol already has a pending limit order (" + sym + ")";
+         outReason = "Pending order already working on " + sym;
          return false;
       }
+      openCount++;
    }
-   if(activeTotal >= InpMaxOpenTrades)
+
+   if(openCount >= InpMaxOpenTrades)
    {
-      outReason = StringFormat("Max concurrent trades reached (%d/%d)", activeTotal, InpMaxOpenTrades);
+      outReason = StringFormat("Max Open Trades Reached (%d/%d)", openCount, InpMaxOpenTrades);
       return false;
    }
 
-   // 4. Per-Symbol Cooldown Guard (prevent churning / rapid re-entries)
-   if(InpCooldownMinutes > 0 && HistorySelect(TimeCurrent() - InpCooldownMinutes * 60, TimeCurrent()))
+   if(HistorySelect(TimeCurrent() - InpCooldownMinutes * 60, TimeCurrent()))
    {
       int deals = HistoryDealsTotal();
       for(int d = deals - 1; d >= 0; d--)
@@ -200,101 +279,109 @@ bool CanOpenNewTrade(const string sym, const string comment, string &outReason)
          ulong dticket = HistoryDealGetTicket(d);
          if(dticket == 0) continue;
          if(HistoryDealGetString(dticket, DEAL_SYMBOL) == sym &&
-            HistoryDealGetInteger(dticket, DEAL_MAGIC) == InpMagicNumber)
+            HistoryDealGetInteger(dticket, DEAL_MAGIC) == InpMagicNumber &&
+            HistoryDealGetInteger(dticket, DEAL_ENTRY) == DEAL_ENTRY_IN)
          {
-            outReason = StringFormat("Symbol cooldown active (%d min between setups on %s)", InpCooldownMinutes, sym);
+            outReason = StringFormat("Cooldown active on %s (%d min)", sym, InpCooldownMinutes);
             return false;
          }
       }
    }
 
-   outReason = "Approved";
+   outReason = "OK";
    return true;
 }
 
 //+------------------------------------------------------------------+
-//| Exact MT5 Native Risk-Based Lot Size Calculator                  |
+//| Exact Risk-Managed Lot Size Calculation Using OrderCalcProfit    |
 //+------------------------------------------------------------------+
-double CalculateRiskLot(const string sym, bool isBuy, double entry, double sl, double requestedRiskPct, double &outRiskUsd, string &outReason)
+double CalculateRiskLot(const string sym, bool isBuy, double entryPrice, double slPrice, double &outRiskUsd)
 {
-   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-   if(eq <= 0.0) eq = AccountInfoDouble(ACCOUNT_BALANCE);
-   double slDist = MathAbs(entry - sl);
-   if(slDist <= 0.0)
-   {
-      outReason = "Invalid Stop Loss distance (0)";
-      return 0.0;
-   }
+   outRiskUsd = 0.0;
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(equity <= 0.0) equity = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(equity <= 0.0) return 0.0;
 
-   double safeRiskPct = MathMin(MathMax(requestedRiskPct, 0.25), InpMaxRiskPercent);
-   double targetRiskUsd = eq * (safeRiskPct / 100.0);
+   double riskPct = MathMin(MathMax(InpRiskPercent, 0.10), InpMaxRiskPercent);
+   double targetRiskUsd = equity * (riskPct / 100.0);
 
-   // Calculate exact loss for 1.0 lot using MT5 OrderCalcProfit
-   double profitOneLot = 0.0;
-   ENUM_ORDER_TYPE ordType = isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-   bool calcOk = OrderCalcProfit(ordType, sym, 1.0, entry, sl, profitOneLot);
-   double lossPerOneLot = MathAbs(profitOneLot);
+   double volMin  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+   double volMax  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
+   double volStep = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+   if(volMin <= 0.0)  volMin = 0.01;
+   if(volMax <= 0.0)  volMax = 100.0;
+   if(volStep <= 0.0) volStep = 0.01;
 
-   if(!calcOk || lossPerOneLot <= 0.0)
+   double slDist = MathAbs(entryPrice - slPrice);
+   if(slDist <= 0.0) return 0.0;
+
+   double lossForOneLot = 0.0;
+   ENUM_ORDER_TYPE calcType = isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   if(OrderCalcProfit(calcType, sym, 1.0, entryPrice, slPrice, lossForOneLot))
+      lossForOneLot = MathAbs(lossForOneLot);
+
+   if(lossForOneLot <= 0.0)
    {
       double tickVal  = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
       double tickSize = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+      double contract = SymbolInfoDouble(sym, SYMBOL_TRADE_CONTRACT_SIZE);
       if(tickVal > 0.0 && tickSize > 0.0)
-         lossPerOneLot = (slDist / tickSize) * tickVal;
+         lossForOneLot = (slDist / tickSize) * tickVal;
+      else if(contract > 0.0)
+         lossForOneLot = slDist * contract;
       else
-         lossPerOneLot = slDist;
+         lossForOneLot = slDist;
    }
 
-   double minVol  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
-   double maxVol  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
-   double stepVol = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
-   if(minVol <= 0.0) minVol = 0.01;
-   if(maxVol <= 0.0) maxVol = 50.0;
-   if(stepVol <= 0.0) stepVol = 0.01;
+   if(lossForOneLot <= 0.0) return 0.0;
 
-   // Check if even minimum volume exceeds Hard Max Risk Cap
-   double minLotRiskUsd = minVol * lossPerOneLot;
-   double minLotRiskPct = (eq > 0.0) ? (minLotRiskUsd / eq) * 100.0 : 100.0;
-   if(minLotRiskPct > InpMaxRiskPercent)
+   double rawLots = targetRiskUsd / lossForOneLot;
+   double snappedLots = MathFloor(rawLots / volStep) * volStep;
+   if(snappedLots < volMin)
    {
-      outReason = StringFormat("Blocked: Min lot (%.3f) risks $%.2f (%.2f%% > %.2f%% max cap)",
-                               minVol, minLotRiskUsd, minLotRiskPct, InpMaxRiskPercent);
-      return 0.0;
+      double minLotLoss = lossForOneLot * volMin;
+      double minLotRiskPct = (minLotLoss / equity) * 100.0;
+      if(minLotRiskPct > InpMaxRiskPercent)
+      {
+         Print("SMC_Auto_Bridge [RISK GUARD] Blocked ", sym, ": Min lot (", volMin,
+               ") risks $", DoubleToString(minLotLoss, 2), " (", DoubleToString(minLotRiskPct, 2),
+               "% > Max ", DoubleToString(InpMaxRiskPercent, 2), "%)");
+         return 0.0;
+      }
+      snappedLots = volMin;
    }
+   if(snappedLots > volMax) snappedLots = volMax;
 
-   double rawLot = targetRiskUsd / lossPerOneLot;
-   double steps  = MathFloor((rawLot + 1e-7) / stepVol);
-   double lot    = MathMax(minVol, steps * stepVol);
-   lot = MathMin(maxVol, lot);
+   int lotDigits = 2;
+   if(volStep >= 1.0) lotDigits = 0;
+   else if(volStep >= 0.1) lotDigits = 1;
+   else if(volStep >= 0.01) lotDigits = 2;
+   else lotDigits = 3;
 
-   int volDigits = 2;
-   if(stepVol < 0.01) volDigits = 3;
-   else if(stepVol >= 0.1) volDigits = 1;
-   lot = NormalizeDouble(lot, volDigits);
-
-   outRiskUsd = lot * lossPerOneLot;
-   outReason  = StringFormat("Lot %.3f ($%.2f risk = %.2f%% of $%.2f)", lot, outRiskUsd, (outRiskUsd / eq) * 100.0, eq);
-   return lot;
+   snappedLots = NormalizeDouble(snappedLots, lotDigits);
+   outRiskUsd  = snappedLots * lossForOneLot;
+   return snappedLots;
 }
 
 //+------------------------------------------------------------------+
-//| Execute Verified Pure A+ Trade with Full Risk & Stops Guard      |
+//| Execute Verified Pure A+ Trade with Full Risk & Stops Validation |
 //+------------------------------------------------------------------+
-bool ExecuteVerifiedAPlusTrade(const string cmdId, const string sym, bool isBuy, double entry, double sl, double tp, const string comment)
+bool ExecuteVerifiedAPlusTrade(const string cmdId, const string sym, bool isBuy,
+                               double entry, double sl, double tp, const string comment)
 {
-   SymbolSelect(sym, true);
-   ConfigureSymbolFilling(sym);
+   if(!SymbolInfoInteger(sym, SYMBOL_SELECT))
+      SymbolSelect(sym, true);
 
-   if(IsCounterSpikeTrade(sym, isBuy))
+   string blockReason = "";
+   if(!CanOpenNewTrade(sym, comment, blockReason))
    {
-      Print("SMC Risk Guard [", cmdId, "] BLOCKED counter-spike trade on ", sym);
+      Print("SMC_Auto_Bridge [", cmdId, "] SKIPPED ", sym, ": ", blockReason);
       return false;
    }
 
-   string riskReason = "";
-   if(!CanOpenNewTrade(sym, comment, riskReason))
+   if(IsCounterSpikeTrade(sym, isBuy))
    {
-      Print("SMC Risk Guard [", cmdId, "] BLOCKED on ", sym, ": ", riskReason);
+      Print("SMC_Auto_Bridge [", cmdId, "] BLOCKED counter-spike trade on ", sym);
       return false;
    }
 
@@ -302,87 +389,92 @@ bool ExecuteVerifiedAPlusTrade(const string cmdId, const string sym, bool isBuy,
    sl    = NormalizePrice(sym, sl);
    tp    = NormalizePrice(sym, tp);
 
-   double riskDist = MathAbs(entry - sl);
-   double rewDist  = MathAbs(tp - entry);
-   if(riskDist <= 0.0 || (rewDist / riskDist) < 1.50)
+   double riskDist   = MathAbs(entry - sl);
+   double rewardDist = MathAbs(tp - entry);
+   if(riskDist <= 0.0 || rewardDist <= 0.0) return false;
+
+   double rr = rewardDist / riskDist;
+   if(rr < InpMinRR - 0.05)
    {
-      Print("SMC Risk Guard [", cmdId, "] BLOCKED on ", sym, ": R:R ", DoubleToString(rewDist / MathMax(riskDist, 1e-8), 2), " below minimum 1.50R");
+      Print("SMC_Auto_Bridge [", cmdId, "] BLOCKED ", sym, ": R:R ", DoubleToString(rr, 2),
+            " < Minimum Required 1:", DoubleToString(InpMinRR, 2));
       return false;
    }
 
-   double riskUsd = 0.0;
-   string sizeReason = "";
-   double lot = CalculateRiskLot(sym, isBuy, entry, sl, InpRiskPercent, riskUsd, sizeReason);
-   if(lot <= 0.0)
-   {
-      Print("SMC Risk Guard [", cmdId, "] BLOCKED sizing on ", sym, ": ", sizeReason);
-      return false;
-   }
+   double actualRiskUsd = 0.0;
+   double lots = CalculateRiskLot(sym, isBuy, entry, sl, actualRiskUsd);
+   if(lots <= 0.0) return false;
 
-   double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
-   double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+   ConfigureSymbolFilling(sym);
+
+   double ask   = SymbolInfoDouble(sym, SYMBOL_ASK);
+   double bid   = SymbolInfoDouble(sym, SYMBOL_BID);
    double point = SymbolInfoDouble(sym, SYMBOL_POINT);
    int stopsLvl = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
-   double minStopDist = MathMax((double)stopsLvl * point, riskDist * 0.08);
+   double minStopDist = MathMax((double)stopsLvl * point, point * 10.0);
 
    bool ok = false;
-   datetime expTime = TimeCurrent() + InpPendingExpiryMin * 60;
+   string execMode = "";
 
    if(isBuy)
    {
-      if(sl >= entry || tp <= entry) return false;
-      // If current Ask is right inside the Order Block entry zone (within 35% of SL distance), execute Market BUY
-      if(MathAbs(ask - entry) <= riskDist * 0.35 && (ask - sl) > minStopDist && (tp - ask) > minStopDist)
-         ok = g_trade.Buy(lot, sym, ask, sl, tp, comment);
-      else if(entry < ask - minStopDist)
-         ok = g_trade.BuyLimit(lot, entry, sym, sl, tp, ORDER_TIME_SPECIFIED, expTime, comment);
-      else if(entry > ask + minStopDist)
-         ok = g_trade.BuyStop(lot, entry, sym, sl, tp, ORDER_TIME_SPECIFIED, expTime, comment);
-      else if((ask - sl) > minStopDist && (tp - ask) > minStopDist)
-         ok = g_trade.Buy(lot, sym, ask, sl, tp, comment);
+      if(MathAbs(ask - entry) <= riskDist * 0.35 || entry >= ask - minStopDist)
+      {
+         double mktSl = (sl < ask - minStopDist) ? sl : NormalizePrice(sym, ask - MathMax(riskDist, minStopDist * 1.5));
+         double mktTp = (tp > ask + minStopDist) ? tp : NormalizePrice(sym, ask + MathMax(rewardDist, minStopDist * 3.0));
+         execMode = "MARKET_BUY_APLUS";
+         ok = g_trade.Buy(lots, sym, 0.0, mktSl, mktTp, comment);
+      }
+      else
+      {
+         execMode = "BUY_LIMIT_APLUS";
+         ok = g_trade.BuyLimit(lots, entry, sym, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
    }
    else
    {
-      if(sl <= entry || tp >= entry) return false;
-      // If current Bid is right inside the Order Block entry zone (within 35% of SL distance), execute Market SELL
-      if(MathAbs(bid - entry) <= riskDist * 0.35 && (sl - bid) > minStopDist && (bid - tp) > minStopDist)
-         ok = g_trade.Sell(lot, sym, bid, sl, tp, comment);
-      else if(entry > bid + minStopDist)
-         ok = g_trade.SellLimit(lot, entry, sym, sl, tp, ORDER_TIME_SPECIFIED, expTime, comment);
-      else if(entry < bid - minStopDist)
-         ok = g_trade.SellStop(lot, entry, sym, sl, tp, ORDER_TIME_SPECIFIED, expTime, comment);
-      else if((sl - bid) > minStopDist && (bid - tp) > minStopDist)
-         ok = g_trade.Sell(lot, sym, bid, sl, tp, comment);
+      if(MathAbs( entry - bid ) <= riskDist * 0.35 || entry <= bid + minStopDist)
+      {
+         double mktSl = (sl > bid + minStopDist) ? sl : NormalizePrice(sym, bid + MathMax(riskDist, minStopDist * 1.5));
+         double mktTp = (tp < bid - minStopDist) ? tp : NormalizePrice(sym, bid - MathMax(rewardDist, minStopDist * 3.0));
+         execMode = "MARKET_SELL_APLUS";
+         ok = g_trade.Sell(lots, sym, 0.0, mktSl, mktTp, comment);
+      }
+      else
+      {
+         execMode = "SELL_LIMIT_APLUS";
+         ok = g_trade.SellLimit(lots, entry, sym, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
    }
 
-   Print("SMC Pure A+ Execution [", cmdId, "] ", sym, " ", (isBuy ? "BUY" : "SELL"),
-         " | ", sizeReason, " | Entry=", entry, " SL=", sl, " TP=", tp,
-         " -> ", (ok ? "SUCCESS" : "FAILED (" + g_trade.ResultRetcodeDescription() + ")"));
+   Print("SMC_Auto_Bridge [", cmdId, "] ", execMode, " ", sym,
+         " Lot=", lots, " (Risk=$", DoubleToString(actualRiskUsd, 2), ", RR=1:", DoubleToString(rr, 2), ")",
+         " Entry=", entry, " SL=", sl, " TP=", tp,
+         " -> ", (ok ? "EXECUTED" : "FAILED (" + IntegerToString(GetLastError()) + " / " + g_trade.ResultRetcodeDescription() + ")"));
    return ok;
 }
 
 //+------------------------------------------------------------------+
-//| Auto-Breakeven at TP1 (50% EQ) & X1/X2/X3 Structural Trailing    |
+//| Manage Open Positions: Auto-Breakeven @ 1.5R + M5 Swing Trailing |
 //+------------------------------------------------------------------+
 void ManageOpenPositionsAndTrailing()
 {
    if(!InpEnableAutoExe) return;
 
-   // 1. Clean up stale pending limit orders older than InpPendingExpiryMin
-   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   for(int j = OrdersTotal() - 1; j >= 0; j--)
    {
-      ulong oticket = OrderGetTicket(i);
-      if(oticket == 0) continue;
-      if(OrderGetInteger(ORDER_MAGIC) != InpMagicNumber) continue;
-      datetime setupT = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
-      if(InpPendingExpiryMin > 0 && (TimeCurrent() - setupT) > InpPendingExpiryMin * 60)
+      ulong ot = OrderGetTicket(j);
+      if(ot == 0) continue;
+      long setupTime = OrderGetInteger(ORDER_TIME_SETUP);
+      string oComm   = OrderGetString(ORDER_COMMENT);
+      if((StringFind(oComm, "SMC_") >= 0 || OrderGetInteger(ORDER_MAGIC) == InpMagicNumber) &&
+         (TimeCurrent() - setupTime > InpPendingExpiryMin * 60))
       {
-         g_trade.OrderDelete(oticket);
-         Print("SMC Risk Manager: Expired stale pending order #", oticket);
+         g_trade.OrderDelete(ot);
+         Print("SMC_Auto_Bridge: Expired stale pending order #", ot, " on ", OrderGetString(ORDER_SYMBOL));
       }
    }
 
-   // 2. Manage Open Positions: Auto-Breakeven at 50% EQ (TP1) + X1/X2/X3 Swing Trailing (Ch. 7 Fig 7.4)
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
@@ -390,271 +482,258 @@ void ManageOpenPositionsAndTrailing()
 
       string sym   = PositionGetString(POSITION_SYMBOL);
       long   type  = PositionGetInteger(POSITION_TYPE);
-      bool   isBuy = (type == POSITION_TYPE_BUY);
       double openP = PositionGetDouble(POSITION_PRICE_OPEN);
       double curP  = PositionGetDouble(POSITION_PRICE_CURRENT);
-      double curSL = PositionGetDouble(POSITION_SL);
-      double curTP = PositionGetDouble(POSITION_TP);
-      datetime posTime = (datetime)PositionGetInteger(POSITION_TIME);
+      double curSl = PositionGetDouble(POSITION_SL);
+      double curTp = PositionGetDouble(POSITION_TP);
+      bool   isBuy = (type == POSITION_TYPE_BUY);
 
-      double point = SymbolInfoDouble(sym, SYMBOL_POINT);
-      int stopsLvl = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
-      double minDist = MathMax((double)stopsLvl * point, point * 10.0);
+      double point    = SymbolInfoDouble(sym, SYMBOL_POINT);
+      int    stopsLvl = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
+      double minDist  = MathMax((double)stopsLvl * point, point * 10.0);
 
-      double targetDist = (curTP > 0.0) ? MathAbs(curTP - openP) : 0.0;
-      double currentGain = isBuy ? (curP - openP) : (openP - curP);
+      double targetDist = MathAbs(curTp - openP);
+      double initRisk   = (curSl > 0.0 && ((isBuy && curSl < openP) || (!isBuy && curSl > openP)))
+                          ? MathAbs(openP - curSl)
+                          : (targetDist > 0.0 ? targetDist / 3.0 : 0.0);
+      if(initRisk <= 0.0) continue;
 
-      double candidateSL = curSL;
+      double profitDist = isBuy ? (curP - openP) : (openP - curP);
+      double currentR   = profitDist / initRisk;
+
+      double candidateSl = curSl;
+
+      if(currentR >= 1.35)
+      {
+         double bePlus = isBuy ? (openP + initRisk * 0.15) : (openP - initRisk * 0.15);
+         if(isBuy && (curSl == 0.0 || bePlus > candidateSl + point))
+            candidateSl = bePlus;
+         else if(!isBuy && (curSl == 0.0 || bePlus < candidateSl - point))
+            candidateSl = bePlus;
+      }
+
+      if(currentR >= 1.50 && Bars(sym, PERIOD_M5) > 25)
+      {
+         MqlRates m5[];
+         ArraySetAsSeries(m5, true);
+         int copied = CopyRates(sym, PERIOD_M5, 0, 20, m5);
+         if(copied >= 10)
+         {
+            for(int k = 2; k <= copied - 3; k++)
+            {
+               if(isBuy)
+               {
+                  bool isSwingLow = (m5[k].low < m5[k-1].low && m5[k].low <= m5[k+1].low);
+                  if(isSwingLow && m5[k].low > openP && m5[k].low < curP - minDist)
+                  {
+                     if(m5[k].low > candidateSl + point * 2)
+                        candidateSl = m5[k].low;
+                     break;
+                  }
+               }
+               else
+               {
+                  bool isSwingHigh = (m5[k].high > m5[k-1].high && m5[k].high >= m5[k+1].high);
+                  if(isSwingHigh && m5[k].high < openP && m5[k].high > curP + minDist)
+                  {
+                     if(curSl == 0.0 || m5[k].high < candidateSl - point * 2)
+                        candidateSl = m5[k].high;
+                     break;
+                  }
+               }
+            }
+         }
+      }
+
+      candidateSl = NormalizePrice(sym, candidateSl);
       bool shouldModify = false;
+      if(isBuy && candidateSl > curSl + point * 2 && candidateSl < curP - minDist)
+         shouldModify = true;
+      if(!isBuy && (curSl == 0.0 || candidateSl < curSl - point * 2) && candidateSl > curP + minDist)
+         shouldModify = true;
 
-      // A. Chapter 7 Breakeven Lock when price reaches 45% of TP2 distance (TP1 50% Equilibrium)
-      if(targetDist > 0.0 && currentGain >= targetDist * 0.45)
-      {
-         double beBuffer = targetDist * 0.04;
-         double bePrice  = isBuy ? NormalizePrice(sym, openP + beBuffer) : NormalizePrice(sym, openP - beBuffer);
-         if(isBuy && (curSL == 0.0 || curSL < openP) && bePrice < curP - minDist)
-         {
-            candidateSL  = bePrice;
-            shouldModify = true;
-         }
-         else if(!isBuy && (curSL == 0.0 || curSL > openP) && bePrice > curP + minDist)
-         {
-            candidateSL  = bePrice;
-            shouldModify = true;
-         }
-      }
-
-      // B. Chapter 7 Fig 7.4: X1 / X2 / X3 Structural Swing Trailing on M5
-      MqlRates m5[];
-      ArraySetAsSeries(m5, true); // index 0 = newest bar
-      int copied = CopyRates(sym, PERIOD_M5, 0, 30, m5);
-      if(copied >= 6)
-      {
-         for(int k = 2; k < copied - 2; k++)
-         {
-            if(m5[k].time <= posTime) break;
-            if(isBuy)
-            {
-               // Confirmed M5 swing low in profit above openP
-               bool isSwingLow = (m5[k].low < m5[k - 1].low && m5[k].low <= m5[k + 1].low && m5[k - 1].close > m5[k].high);
-               if(isSwingLow && m5[k].low > openP && m5[k].low < curP - minDist)
-               {
-                  double swingSL = NormalizePrice(sym, m5[k].low);
-                  if(curSL == 0.0 || swingSL > candidateSL + point * 5.0)
-                  {
-                     candidateSL  = swingSL;
-                     shouldModify = true;
-                  }
-                  break;
-               }
-            }
-            else
-            {
-               // Confirmed M5 swing high in profit below openP
-               bool isSwingHigh = (m5[k].high > m5[k - 1].high && m5[k].high >= m5[k + 1].high && m5[k - 1].close < m5[k].low);
-               if(isSwingHigh && m5[k].high < openP && m5[k].high > curP + minDist)
-               {
-                  double swingSL = NormalizePrice(sym, m5[k].high);
-                  if(curSL == 0.0 || swingSL < candidateSL - point * 5.0)
-                  {
-                     candidateSL  = swingSL;
-                     shouldModify = true;
-                  }
-                  break;
-               }
-            }
-         }
-      }
-
-      if(shouldModify && MathAbs(candidateSL - curSL) > point * 3.0)
+      if(shouldModify)
       {
          ConfigureSymbolFilling(sym);
-         if(g_trade.PositionModify(ticket, candidateSL, curTP))
-         {
-            Print("SMC Auto-Trail (Ch. 7 X1/X2/X3 + BE): Locked SL on #", ticket, " (", sym, ") -> ", candidateSL);
-         }
+         if(g_trade.PositionModify(ticket, candidateSl, curTp))
+            Print("SMC_Auto_Bridge [X1-X3 TRAIL] Ticket #", ticket, " (", sym, ") SL trailed: ", curSl, " -> ", candidateSl);
       }
    }
 }
 
 //+------------------------------------------------------------------+
-//| Native MQL5 Autonomous Pure A+ SMC Scanner (H1 -> M5)            |
-//| Enforces all 7 Frank Miller Book Rules before executing on MT5   |
+//| Native MQL5 Pure A+ SMC Scanner (H1 Structure + M5 CHoCH Entry)  |
 //+------------------------------------------------------------------+
-bool EvaluateSymbolPureAPlus(const string sym)
+void EvaluateSymbolPureAPlus(const string sym)
 {
-   MqlRates h1[], m5[];
-   ArraySetAsSeries(h1, false);
-   ArraySetAsSeries(m5, false);
+   if(!InpEnableAutoExe || !InpNativeAPlusScan) return;
+   if(Bars(sym, PERIOD_H1) < 120 || Bars(sym, PERIOD_M5) < 120) return;
 
-   int nH1 = CopyRates(sym, PERIOD_H1, 0, 60, h1);
-   int nM5 = CopyRates(sym, PERIOD_M5, 0, 140, m5);
-   if(nH1 < 30 || nM5 < 60) return false;
+   string reason = "";
+   if(!CanOpenNewTrade(sym, "SMC_APLUS_NATIVE", reason)) return;
 
-   // Compute 14-bar ATR on H1 and M5
-   double atrH1 = 0.0, atrM5 = 0.0;
-   for(int k = nH1 - 14; k < nH1; k++) atrH1 += (h1[k].high - h1[k].low);
-   atrH1 /= 14.0;
-   for(int k = nM5 - 14; k < nM5; k++) atrM5 += (m5[k].high - m5[k].low);
-   atrM5 /= 14.0;
-   if(atrH1 <= 0.0 || atrM5 <= 0.0) return false;
+   MqlRates htf[], ltf[];
+   ArraySetAsSeries(htf, false);
+   ArraySetAsSeries(ltf, false);
 
-   // Scan recent H1 impulse waves (last 6 closed H1 bars)
-   for(int i = nH1 - 2; i >= nH1 - 7; i--)
+   int cH = CopyRates(sym, PERIOD_H1, 0, 120, htf);
+   int cL = CopyRates(sym, PERIOD_M5, 0, 120, ltf);
+   if(cH < 60 || cL < 60) return;
+
+   double htfAtr = 0.0;
+   for(int i = cH - 15; i < cH - 1; i++)
+      htfAtr += (htf[i].high - htf[i].low);
+   htfAtr /= 14.0;
+   if(htfAtr <= 0.0) return;
+
+   double swingHigh = -1e18, swingLow = 1e18;
+   int shIdx = -1, slIdx = -1;
+   for(int i = cH - 45; i <= cH - 6; i++)
    {
-      double range = h1[i].high - h1[i].low;
-      double body  = MathAbs(h1[i].close - h1[i].open);
-      if(range <= 0.0 || (body / range) < 0.50) continue;
+      if(htf[i].high > swingHigh) { swingHigh = htf[i].high; shIdx = i; }
+      if(htf[i].low  < swingLow)  { swingLow  = htf[i].low;  slIdx = i; }
+   }
+   if(shIdx < 10 || slIdx < 10) return;
+   double range = swingHigh - swingLow;
+   if(range < htfAtr * 2.2) return;
 
-      bool isBullLeg = (h1[i].close > h1[i].open);
-      bool isBuy     = isBullLeg; // Buy in Discount after Bullish BOS; Sell in Premium after Bearish BOS
+   double eq50 = (swingHigh + swingLow) * 0.5;
+   double curPrice = ltf[cL - 1].close;
 
-      if(IsCounterSpikeTrade(sym, isBuy)) continue;
+   bool bullTrend = (slIdx < shIdx && htf[shIdx].close > htf[shIdx - 1].high);
+   bool bearTrend = (shIdx < slIdx && htf[slIdx].close < htf[slIdx - 1].low);
 
-      // 1. Find Origin (Point A) and Swing Extreme (Point B)
-      int originIdx = i - 1;
-      for(int k = i; k >= MathMax(2, i - 5); k--)
+   if(bullTrend && curPrice < eq50 && !IsCounterSpikeTrade(sym, true))
+   {
+      int obIdx = -1;
+      for(int k = slIdx; k <= shIdx - 2; k++)
       {
-         if(isBullLeg && h1[k].low <= h1[originIdx].low) originIdx = k;
-         if(!isBullLeg && h1[k].high >= h1[originIdx].high) originIdx = k;
+         bool sweptPrev = (htf[k].low < htf[k - 1].low);
+         bool hasFvg    = (htf[k + 2].low > htf[k].high);
+         if(sweptPrev && hasFvg) { obIdx = k; break; }
       }
+      if(obIdx < 0) return;
 
-      // 2. Rule Ch. 1 & 2: Must break prior H1 structure with a Candlestick Body Close + Valid Pullback Sweep
-      double priorSwing = isBullLeg ? -1e18 : 1e18;
-      bool sweptPullback = false;
-      for(int k = MathMax(2, originIdx - 6); k < originIdx; k++)
+      double poiTop = MathMax(htf[obIdx].high, htf[obIdx].low + htfAtr * 0.6);
+      double poiBot = htf[obIdx].low;
+
+      bool hasIdmBeforeOb = false;
+      for(int m = obIdx + 2; m < shIdx - 1; m++)
       {
-         if(isBullLeg && h1[k].high > priorSwing) priorSwing = h1[k].high;
-         if(!isBullLeg && h1[k].low < priorSwing) priorSwing = h1[k].low;
-         // Valid non-inside-bar pullback check (Ch. 1)
-         bool inside = (h1[k].high <= h1[k - 1].high && h1[k].low >= h1[k - 1].low);
-         if(!inside)
+         if(htf[m].low < htf[m - 1].low && htf[m].low > poiTop)
          {
-            if(isBullLeg && h1[k].low < h1[k - 1].low) sweptPullback = true;
-            if(!isBullLeg && h1[k].high > h1[k - 1].high) sweptPullback = true;
+            hasIdmBeforeOb = true;
+            break;
          }
       }
-      bool bosBodyConfirmed = isBullLeg ? (h1[i].close > priorSwing) : (h1[i].close < priorSwing);
-      if(!bosBodyConfirmed || !sweptPullback) continue;
+      if(!hasIdmBeforeOb) return;
 
-      // 3. Rule Ch. 4: Valid H1 Order Block at Origin (Requires BOTH Liquidity Sweep + Imbalance/FVG)
-      bool obSweptPrev = isBullLeg ? (h1[originIdx].low < h1[originIdx - 1].low)
-                                   : (h1[originIdx].high > h1[originIdx - 1].high);
-      bool obHasFvg    = false;
-      if(originIdx + 2 < nH1)
+      bool tappedPoi = (ltf[cL - 1].low <= poiTop && ltf[cL - 1].close >= poiBot) ||
+                       (ltf[cL - 2].low <= poiTop && ltf[cL - 2].close >= poiBot) ||
+                       (ltf[cL - 3].low <= poiTop && ltf[cL - 3].close >= poiBot);
+      if(!tappedPoi) return;
+
+      double ltfPrevHigh = MathMax(ltf[cL - 4].high, MathMax(ltf[cL - 5].high, ltf[cL - 6].high));
+      double ltfSweepLow = MathMin(ltf[cL - 1].low, MathMin(ltf[cL - 2].low, ltf[cL - 3].low));
+      bool ltfChoch      = (ltf[cL - 1].close > ltfPrevHigh && ltf[cL - 1].close > ltf[cL - 1].open);
+      bool ltfFvg        = (ltf[cL - 1].low > ltf[cL - 3].high) || ((ltf[cL - 1].close - ltf[cL - 1].open) > (ltf[cL - 1].high - ltf[cL - 1].low) * 0.65);
+
+      if(ltfChoch && ltfFvg)
       {
-         if(isBullLeg && h1[originIdx + 2].low > h1[originIdx].high) obHasFvg = true;
-         if(!isBullLeg && h1[originIdx + 2].high < h1[originIdx].low) obHasFvg = true;
+         double ltfAtr = (htfAtr / 3.0);
+         double entry  = curPrice;
+         double sl     = ltfSweepLow - ltfAtr * 0.20;
+         double tp2    = swingHigh;
+         double risk   = MathAbs(entry - sl);
+         if(risk > 0.0 && ((tp2 - entry) / risk) >= InpMinRR && ((eq50 - entry) / risk) >= 1.50)
+         {
+            string cmdId = "NATIVE_APLUS_BUY_" + sym + "_" + IntegerToString((int)ltf[cL - 1].time);
+            ExecuteVerifiedAPlusTrade(cmdId, sym, true, entry, sl, tp2, "SMC_APLUS_7of7_BUY");
+         }
       }
-      if(!obSweptPrev || !obHasFvg) continue;
-
-      double obTop = h1[originIdx].high;
-      double obBot = h1[originIdx].low;
-      if((obTop - obBot) < 0.60 * atrH1) // Ch. 4 60% ATR Rule
-      {
-         double midOb = (obTop + obBot) * 0.5;
-         obTop = midOb + 0.5 * atrH1;
-         obBot = midOb - 0.5 * atrH1;
-      }
-
-      double pointA = isBullLeg ? h1[originIdx].low : h1[originIdx].high;
-      double pointB = isBullLeg ? h1[i].high : h1[i].low;
-      double eqMid  = (pointA + pointB) * 0.5; // 50% Fib Equilibrium (Ch. 3)
-
-      // 4. Rule Ch. 3 & 5: Check M5 for Inducement (IDM) Sweep + POI Tap inside Discount (<50%) / Premium (>50%)
-      datetime startT = h1[i].time + 3600;
-      int m5TapIdx = -1;
-      bool idmSwept = false;
-      for(int m = 5; m < nM5 - 2; m++)
-      {
-         if(m5[m].time < startT) continue;
-         if(isBuy && m5[m].low < m5[m - 1].low && m5[m].high > m5[m - 1].high) idmSwept = true;
-         if(!isBuy && m5[m].high > m5[m - 1].high && m5[m].low < m5[m - 1].low) idmSwept = true;
-
-         if(isBuy && m5[m].low <= obTop && m5[m].low <= eqMid) { m5TapIdx = m; break; }
-         if(!isBuy && m5[m].high >= obBot && m5[m].high >= eqMid) { m5TapIdx = m; break; }
-      }
-      if(m5TapIdx < 0 || !idmSwept) continue;
-
-      // 5. Rule Ch. 6 & 7: M5 Advanced CHoCH Body-Close Confirmation on the Just-Closed M5 Candle (nM5 - 2)
-      int lastClosedM5 = nM5 - 2;
-      if(lastClosedM5 <= m5TapIdx || (lastClosedM5 - m5TapIdx) > 16) continue;
-
-      double poiExtreme = isBuy ? m5[m5TapIdx].low : m5[m5TapIdx].high;
-      double minorStructure = isBuy ? -1e18 : 1e18;
-      for(int m = m5TapIdx; m < lastClosedM5; m++)
-      {
-         if(isBuy && m5[m].low < poiExtreme) poiExtreme = m5[m].low;
-         if(!isBuy && m5[m].high > poiExtreme) poiExtreme = m5[m].high;
-         if(isBuy && m5[m].high > minorStructure) minorStructure = m5[m].high;
-         if(!isBuy && m5[m].low < minorStructure) minorStructure = m5[m].low;
-      }
-
-      // Fresh M5 Advanced CHoCH body close on bar [lastClosedM5]
-      bool freshChoch = isBuy
-         ? (m5[lastClosedM5].close > minorStructure && m5[lastClosedM5 - 1].close <= minorStructure)
-         : (m5[lastClosedM5].close < minorStructure && m5[lastClosedM5 - 1].close >= minorStructure);
-      if(!freshChoch) continue;
-
-      double entry = m5[lastClosedM5].close;
-      // Strict Premium / Discount verification at entry (Ch. 3)
-      if(isBuy && entry > eqMid) continue;
-      if(!isBuy && entry < eqMid) continue;
-
-      double sl = isBuy ? (poiExtreme - 0.20 * atrM5) : (poiExtreme + 0.20 * atrM5);
-      double tp = pointB;
-      double risk = MathAbs(entry - sl);
-      double reward = MathAbs(tp - entry);
-      if(risk <= 0.0 || (reward / risk) < InpMinRR) continue;
-
-      string cmdId = StringFormat("APLUS_%s_%I64d", SanitizeSym(sym), (long)h1[i].time);
-      if(cmdId == g_lastCmdId) return false;
-      g_lastCmdId = cmdId;
-
-      return ExecuteVerifiedAPlusTrade(cmdId, sym, isBuy, entry, sl, tp, "SMC_APLUS_AUTO");
    }
-   return false;
-}
 
-bool IsWeltradeBroker()
-{
-   string srv = AccountInfoString(ACCOUNT_SERVER);
-   long login = AccountInfoInteger(ACCOUNT_LOGIN);
-   if(login == 43374418 || StringFind(srv, "Weltrade") >= 0 || StringFind(srv, "WELTRADE") >= 0)
-      return true;
-   return false;
+   if(bearTrend && curPrice > eq50 && !IsCounterSpikeTrade(sym, false))
+   {
+      int obIdx = -1;
+      for(int k = shIdx; k <= slIdx - 2; k++)
+      {
+         bool sweptPrev = (htf[k].high > htf[k - 1].high);
+         bool hasFvg    = (htf[k + 2].high < htf[k].low);
+         if(sweptPrev && hasFvg) { obIdx = k; break; }
+      }
+      if(obIdx < 0) return;
+
+      double poiTop = htf[obIdx].high;
+      double poiBot = MathMin(htf[obIdx].low, htf[obIdx].high - htfAtr * 0.6);
+
+      bool hasIdmBeforeOb = false;
+      for(int m = obIdx + 2; m < slIdx - 1; m++)
+      {
+         if(htf[m].high > htf[m - 1].high && htf[m].high < poiBot)
+         {
+            hasIdmBeforeOb = true;
+            break;
+         }
+      }
+      if(!hasIdmBeforeOb) return;
+
+      bool tappedPoi = (ltf[cL - 1].high >= poiBot && ltf[cL - 1].close <= poiTop) ||
+                       (ltf[cL - 2].high >= poiBot && ltf[cL - 2].close <= poiTop) ||
+                       (ltf[cL - 3].high >= poiBot && ltf[cL - 3].close <= poiTop);
+      if(!tappedPoi) return;
+
+      double ltfPrevLow   = MathMin(ltf[cL - 4].low, MathMin(ltf[cL - 5].low, ltf[cL - 6].low));
+      double ltfSweepHigh = MathMax(ltf[cL - 1].high, MathMax(ltf[cL - 2].high, ltf[cL - 3].high));
+      bool ltfChoch       = (ltf[cL - 1].close < ltfPrevLow && ltf[cL - 1].close < ltf[cL - 1].open);
+      bool ltfFvg         = (ltf[cL - 1].high < ltf[cL - 3].low) || ((ltf[cL - 1].open - ltf[cL - 1].close) > (ltf[cL - 1].high - ltf[cL - 1].low) * 0.65);
+
+      if(ltfChoch && ltfFvg)
+      {
+         double ltfAtr = (htfAtr / 3.0);
+         double entry  = curPrice;
+         double sl     = ltfSweepHigh + ltfAtr * 0.20;
+         double tp2    = swingLow;
+         double risk   = MathAbs(sl - entry);
+         if(risk > 0.0 && ((entry - tp2) / risk) >= InpMinRR && ((entry - eq50) / risk) >= 1.50)
+         {
+            string cmdId = "NATIVE_APLUS_SELL_" + sym + "_" + IntegerToString((int)ltf[cL - 1].time);
+            ExecuteVerifiedAPlusTrade(cmdId, sym, false, entry, sl, tp2, "SMC_APLUS_7of7_SELL");
+         }
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
-//| Export Live Account & Open Positions / Pending Orders State      |
+//| Export Live Account State & Active Orders to SMC Web Terminal    |
 //+------------------------------------------------------------------+
 void ExportAccountAndOrders()
 {
+   long   login  = AccountInfoInteger(ACCOUNT_LOGIN);
+   string srv    = AccountInfoString(ACCOUNT_SERVER);
    double bal    = AccountInfoDouble(ACCOUNT_BALANCE);
    double eq     = AccountInfoDouble(ACCOUNT_EQUITY);
    double margin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-   long   login  = AccountInfoInteger(ACCOUNT_LOGIN);
-   string srv    = AccountInfoString(ACCOUNT_SERVER);
    string broker = IsWeltradeBroker() ? "weltrade" : "deriv";
 
    string posJson = "[";
    bool firstPos = true;
-   int totalPos = PositionsTotal();
-   for(int i = 0; i < totalPos; i++)
+
+   for(int i = 0; i < PositionsTotal(); i++)
    {
       ulong ticket = PositionGetTicket(i);
       if(ticket == 0) continue;
-      string sym   = PositionGetString(POSITION_SYMBOL);
-      long   type  = PositionGetInteger(POSITION_TYPE);
-      double vol   = PositionGetDouble(POSITION_VOLUME);
-      double openP = PositionGetDouble(POSITION_PRICE_OPEN);
-      double curP  = PositionGetDouble(POSITION_PRICE_CURRENT);
-      double sl    = PositionGetDouble(POSITION_SL);
-      double tp    = PositionGetDouble(POSITION_TP);
-      double prof  = PositionGetDouble(POSITION_PROFIT);
-      long   timeO = PositionGetInteger(POSITION_TIME);
-      string comm  = PositionGetString(POSITION_COMMENT);
-      int    dec   = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      string sym    = PositionGetString(POSITION_SYMBOL);
+      long   type   = PositionGetInteger(POSITION_TYPE);
+      double vol    = PositionGetDouble(POSITION_VOLUME);
+      double openP  = PositionGetDouble(POSITION_PRICE_OPEN);
+      double curP   = PositionGetDouble(POSITION_PRICE_CURRENT);
+      double sl     = PositionGetDouble(POSITION_SL);
+      double tp     = PositionGetDouble(POSITION_TP);
+      double profit = PositionGetDouble(POSITION_PROFIT);
+      long   timeO  = PositionGetInteger(POSITION_TIME);
+      string comm   = PositionGetString(POSITION_COMMENT);
+      int    dec    = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
       if(dec < 0 || dec > 8) dec = 2;
 
       if(!firstPos) posJson += ",";
@@ -662,14 +741,13 @@ void ExportAccountAndOrders()
       posJson += StringFormat(
          "{\"ticket\":%I64u,\"kind\":\"POSITION\",\"broker\":\"%s\",\"symbol\":\"%s\",\"side\":\"%s\",\"lot\":%.3f,\"entry\":%.*f,\"current\":%.*f,\"sl\":%.*f,\"tp\":%.*f,\"profit\":%.2f,\"time\":%I64d,\"comment\":\"%s\"}",
          ticket, broker, sym, (type == POSITION_TYPE_BUY ? "BUY" : "SELL"),
-         vol, dec, openP, dec, curP, dec, sl, dec, tp, prof, timeO, comm
+         vol, dec, openP, dec, curP, dec, sl, dec, tp, profit, timeO, comm
       );
    }
 
-   int totalOrd = OrdersTotal();
-   for(int i = 0; i < totalOrd; i++)
+   for(int j = 0; j < OrdersTotal(); j++)
    {
-      ulong ticket = OrderGetTicket(i);
+      ulong ticket = OrderGetTicket(j);
       if(ticket == 0) continue;
       string sym   = OrderGetString(ORDER_SYMBOL);
       long   type  = OrderGetInteger(ORDER_TYPE);
@@ -714,6 +792,108 @@ void ExportAccountAndOrders()
       FileWriteString(fh, stateJson);
       FileClose(fh);
    }
+}
+
+//+------------------------------------------------------------------+
+//| Export Live 1-Second Bid/Ask Quotes for All Broker Symbols       |
+//+------------------------------------------------------------------+
+void ExportLiveQuotes()
+{
+   string broker = IsWeltradeBroker() ? "weltrade" : "deriv";
+   string qJson = "{";
+   bool first = true;
+
+   for(int i = 0; i < g_brokerSymCount; i++)
+   {
+      string sym = g_brokerSyms[i];
+      double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+      double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+      if(bid <= 0.0) continue;
+
+      int dec = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      if(dec < 0 || dec > 8) dec = 2;
+      long t = (long)SymbolInfoInteger(sym, SYMBOL_TIME);
+      if(t <= 0) t = (long)TimeCurrent();
+
+      if(!first) qJson += ",";
+      first = false;
+      qJson += StringFormat("\"%s\":{\"bid\":%.*f,\"ask\":%.*f,\"digits\":%d,\"time\":%I64d,\"broker\":\"%s\"}",
+                            sym, dec, bid, dec, ask, dec, t, broker);
+   }
+   qJson += "}";
+
+   string qFile = IsWeltradeBroker() ? "smc_bridge\\quotes_weltrade.json" : "smc_bridge\\quotes_deriv.json";
+   int fh = FileOpen(qFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+   if(fh != INVALID_HANDLE)
+   {
+      FileWriteString(fh, qJson);
+      FileClose(fh);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Export All 6 Timeframes for a Single Symbol (Fast & Non-Blocking)|
+//+------------------------------------------------------------------+
+int ExportSymbolTimeframes(const string sym, bool forceWaitIfNeeded)
+{
+   if(StringLen(sym) == 0) return 0;
+   if(!SymbolInfoInteger(sym, SYMBOL_SELECT))
+      SymbolSelect(sym, true);
+
+   double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+   if(bid <= 0.0 && !forceWaitIfNeeded) return 0;
+
+   ENUM_TIMEFRAMES tfs[6] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_H1, PERIOD_H4, PERIOD_D1};
+   int tfSec[6]           = {60, 300, 900, 3600, 14400, 86400};
+   int dec = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+   if(dec < 0 || dec > 8) dec = 2;
+   string fmt = "%I64d,%." + IntegerToString(dec) + "f,%." + IntegerToString(dec) + "f,%." + IntegerToString(dec) + "f,%." + IntegerToString(dec) + "f";
+   string safeSym = SanitizeSym(sym);
+
+   int exported = 0;
+   for(int t = 0; t < 6; t++)
+   {
+      // Non-blocking history check: calling Bars() triggers async download in MT5 without freezing OnTimer!
+      int availBars = Bars(sym, tfs[t]);
+      if(availBars < 5 && !forceWaitIfNeeded)
+         continue;
+
+      MqlRates rates[];
+      ArraySetAsSeries(rates, false);
+      int copied = CopyRates(sym, tfs[t], 0, InpFullBars, rates);
+      if(copied <= 0) continue;
+
+      // Snap the forming candle's close/high/low to the exact live MT5 Bid price
+      if(bid > 0.0)
+      {
+         rates[copied - 1].close = bid;
+         if(bid > rates[copied - 1].high) rates[copied - 1].high = bid;
+         if(bid < rates[copied - 1].low)  rates[copied - 1].low  = bid;
+      }
+
+      string json = "[";
+      for(int i = 0; i < copied; i++)
+      {
+         if(i > 0) json += ",";
+         json += "[" + StringFormat(fmt,
+            (long)rates[i].time,
+            rates[i].open,
+            rates[i].high,
+            rates[i].low,
+            rates[i].close) + "]";
+      }
+      json += "]";
+
+      string filePath = "smc_bridge\\" + safeSym + "_" + IntegerToString(tfSec[t]) + ".json";
+      int fileHandle = FileOpen(filePath, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
+      if(fileHandle != INVALID_HANDLE)
+      {
+         FileWriteString(fileHandle, json);
+         FileClose(fileHandle);
+         exported++;
+      }
+   }
+   return exported;
 }
 
 //+------------------------------------------------------------------+
@@ -804,143 +984,63 @@ void ProcessCommandQueue()
 }
 
 //+------------------------------------------------------------------+
-//| Main Timer: Process Commands, Manage Trailing & Stream OHLCV     |
+//| Read Active Symbol Requested by Browser for Instant 1s Priority  |
+//+------------------------------------------------------------------+
+string GetActivePrioritySymbol()
+{
+   string activeFile = IsWeltradeBroker() ? "smc_bridge\\active_weltrade.txt" : "smc_bridge\\active_deriv.txt";
+   if(!FileIsExist(activeFile, FILE_COMMON)) return _Symbol;
+
+   int fh = FileOpen(activeFile, FILE_READ | FILE_TXT | FILE_COMMON | FILE_SHARE_READ | FILE_SHARE_WRITE);
+   if(fh == INVALID_HANDLE) return _Symbol;
+   string s = FileReadString(fh);
+   FileClose(fh);
+   StringTrimLeft(s);
+   StringTrimRight(s);
+   return (StringLen(s) > 0) ? s : _Symbol;
+}
+
+//+------------------------------------------------------------------+
+//| Main 1-Second Timer: Instant Quotes + Priority Chart + RR Batch  |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   // 1. Execute trades, trail stops, export live account & live bid/ask quotes every 1 second
    ProcessCommandQueue();
    ManageOpenPositionsAndTrailing();
    ExportAccountAndOrders();
+   ExportLiveQuotes();
 
-   // Throttle heavy 500-bar OHLCV file writes to once every 25 seconds after initial sync
-   if(g_initSyncDone && (TimeCurrent() - g_lastCandleSync < 25))
-      return;
-   g_lastCandleSync = TimeCurrent();
+   if(g_brokerSymCount <= 0)
+      InitBrokerSymbols();
 
-   string syms[];
-   int n = StringSplit(InpSymbols, ',', syms);
-   if(n <= 0)
+   // 2. Priority 1-second sync for the symbol currently viewed in the browser (and chart symbol)
+   string activeSym = GetActivePrioritySymbol();
+   if(StringLen(activeSym) > 0)
+      ExportSymbolTimeframes(activeSym, true);
+   if(_Symbol != activeSym)
+      ExportSymbolTimeframes(_Symbol, false);
+
+   // 3. Non-blocking round-robin sync for 4 symbols per second across the broker watchlist
+   int batchSize = 4;
+   int exportedSeries = 0;
+   for(int b = 0; b < batchSize && g_brokerSymCount > 0; b++)
    {
-      ArrayResize(syms, 1);
-      syms[0] = _Symbol;
-      n = 1;
-   }
-
-   // Discover all symbols on the broker server (including Weltrade SyntX / Deriv Synthetics not yet in Market Watch)
-   int allTotal = SymbolsTotal(false);
-   string catJson = "[";
-   bool firstCat = true;
-   for(int m = 0; m < allTotal; m++)
-   {
-      string sName = SymbolName(m, false);
-      if(StringLen(sName) == 0) continue;
-      string up = sName;
-      StringToUpper(up);
-      bool isTarget = (StringFind(up, "PAIN") >= 0 || StringFind(up, "GAIN") >= 0 ||
-                       StringFind(up, "FLIP") >= 0 || StringFind(up, "SWITCH") >= 0 ||
-                       StringFind(up, "BREAK") >= 0 || StringFind(up, "VOL") >= 0 ||
-                       StringFind(up, "SYNT") >= 0 || StringFind(up, "STEP") >= 0 ||
-                       StringFind(up, "BOOM") >= 0 || StringFind(up, "CRASH") >= 0 ||
-                       StringFind(up, "JUMP") >= 0 || StringFind(up, "DEX") >= 0 ||
-                       StringFind(up, "XAU") >= 0 || up == "EURUSD" || up == "GBPUSD" ||
-                       (bool)SymbolInfoInteger(sName, SYMBOL_SELECT));
-      if(isTarget)
+      int idx = (g_rrCursor + b) % g_brokerSymCount;
+      string sym = g_brokerSyms[idx];
+      if(sym != activeSym && sym != _Symbol)
       {
-         SymbolSelect(sName, true);
-         if(!firstCat) catJson += ",";
-         firstCat = false;
-         catJson += "\"" + sName + "\"";
-
-         bool exists = false;
-         for(int s = 0; s < n; s++)
-         {
-            if(syms[s] == sName) { exists = true; break; }
-         }
-         if(!exists)
-         {
-            ArrayResize(syms, n + 1);
-            syms[n] = sName;
-            n++;
-         }
-      }
-   }
-   catJson += "]";
-   string catFile = IsWeltradeBroker() ? "smc_bridge\\catalog_weltrade.json" : "smc_bridge\\catalog_deriv.json";
-   int fhCat = FileOpen(catFile, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
-   if(fhCat != INVALID_HANDLE)
-   {
-      FileWriteString(fhCat, catJson);
-      FileClose(fhCat);
-   }
-
-   ENUM_TIMEFRAMES tfs[6] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_H1, PERIOD_H4, PERIOD_D1};
-   int tfSec[6]           = {60, 300, 900, 3600, 14400, 86400};
-
-   int count = InpFullBars;
-   int exportedCount = 0;
-   bool runAPlusScanNow = (InpEnableAutoExe && InpNativeAPlusScan && (TimeCurrent() - g_lastAPlusScan >= 15));
-   if(runAPlusScanNow) g_lastAPlusScan = TimeCurrent();
-
-   for(int s = 0; s < n; s++)
-   {
-      string sym = syms[s];
-      StringTrimLeft(sym);
-      StringTrimRight(sym);
-      if(StringLen(sym) == 0) continue;
-
-      if(!SymbolInfoInteger(sym, SYMBOL_SELECT))
-         SymbolSelect(sym, true);
-
-      double bid = SymbolInfoDouble(sym, SYMBOL_BID);
-      if(bid <= 0 && !SymbolInfoInteger(sym, SYMBOL_VISIBLE))
-         continue;
-
-      if(runAPlusScanNow)
+         exportedSeries += ExportSymbolTimeframes(sym, false);
          EvaluateSymbolPureAPlus(sym);
-
-      for(int t = 0; t < 6; t++)
-      {
-         MqlRates rates[];
-         ArraySetAsSeries(rates, false);
-         int copied = CopyRates(sym, tfs[t], 0, count, rates);
-         if(copied <= 0) continue;
-
-         int dec = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
-         if(dec < 0 || dec > 8) dec = 2;
-         string fmt = "%I64d,%." + IntegerToString(dec) + "f,%." + IntegerToString(dec) + "f,%." + IntegerToString(dec) + "f,%." + IntegerToString(dec) + "f";
-
-         string json = "[";
-         for(int i = 0; i < copied; i++)
-         {
-            if(i > 0) json += ",";
-            json += "[" + StringFormat(fmt,
-               (long)rates[i].time,
-               rates[i].open,
-               rates[i].high,
-               rates[i].low,
-               rates[i].close) + "]";
-         }
-         json += "]";
-
-         string safeSym = SanitizeSym(sym);
-         string filePath = "smc_bridge\\" + safeSym + "_" + IntegerToString(tfSec[t]) + ".json";
-         int fileHandle = FileOpen(filePath, FILE_WRITE | FILE_TXT | FILE_COMMON | FILE_SHARE_READ);
-         if(fileHandle != INVALID_HANDLE)
-         {
-            FileWriteString(fileHandle, json);
-            FileClose(fileHandle);
-            exportedCount++;
-         }
       }
    }
-
-   if(exportedCount >= 6)
-      g_initSyncDone = true;
+   g_rrCursor = (g_brokerSymCount > 0) ? ((g_rrCursor + batchSize) % g_brokerSymCount) : 0;
 
    if(TimeCurrent() - g_lastLog > 30)
    {
       g_lastLog = TimeCurrent();
-      Print("SMC_Auto_Bridge v4.10 (Pure A+ & Risk Guard): Synced ", n, " symbols (", exportedCount, " series). Account #", AccountInfoInteger(ACCOUNT_LOGIN));
+      Print("SMC_Auto_Bridge v4.20 [1s LIVE]: ActiveSym='", activeSym, "' | Watchlist=", g_brokerSymCount,
+            " | Account #", AccountInfoInteger(ACCOUNT_LOGIN));
    }
 }
 //+------------------------------------------------------------------+

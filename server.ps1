@@ -15,12 +15,10 @@ $mimeTypes = @{
   ".ex5"  = "application/octet-stream"
 }
 
-$mt5Cache = @{}
 $mt5Meta  = @{}
 $mt5AccountState = '{"login":0,"server":"Standby","balance":40.00,"equity":40.00,"freeMargin":40.00,"updated":0,"orders":[]}'
 
 $commonSmcDir = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\Common\Files\smc_bridge"
-$commonCrtDir = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\Common\Files\crt_bridge"
 if (-not (Test-Path $commonSmcDir)) {
   New-Item -ItemType Directory -Path $commonSmcDir -Force | Out-Null
 }
@@ -65,12 +63,14 @@ $aliasMap = @{
   "Jump 100 Index" = "JD100"
   "Range Break 100 Index" = "RDBULL"
   "Range Break 200 Index" = "RDBEAR"
+  "DEX 600 UP Index" = "DEX600UP"
+  "DEX 600 DOWN Index" = "DEX600DN"
+  "DEX 900 UP Index" = "DEX900UP"
+  "DEX 900 DOWN Index" = "DEX900DN"
   "DEX 600 UP" = "DEX600UP"
   "DEX 600 DOWN" = "DEX600DN"
   "DEX 900 UP" = "DEX900UP"
   "DEX 900 DOWN" = "DEX900DN"
-  "DEX 1500 UP" = "DEX1500UP"
-  "DEX 1500 DOWN" = "DEX1500DN"
   "EURUSD" = "frxEURUSD"
   "GBPUSD" = "frxGBPUSD"
   "USDJPY" = "frxUSDJPY"
@@ -94,6 +94,7 @@ while ($listener.IsListening) {
     $res.Headers.Add("Access-Control-Allow-Origin", "*")
     $res.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     $res.Headers.Add("Access-Control-Allow-Headers", "Content-Type")
+    $res.Headers.Add("Cache-Control", "no-store, no-cache, must-revalidate")
     $path = $req.Url.LocalPath
 
     if ($req.HttpMethod -eq "OPTIONS") {
@@ -129,7 +130,7 @@ while ($listener.IsListening) {
         if (Test-Path $ledgerFile) {
           $bytes = [System.IO.File]::ReadAllBytes($ledgerFile)
         } else {
-          $bytes = [System.Text.Encoding]::UTF8.GetBytes('{"account":{"startingBalance":40,"riskPct":2.5},"trades":[]}')
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes('{"account":{"startingBalance":40,"riskPct":1.0},"trades":[]}')
         }
         $res.ContentType = "application/json; charset=utf-8"
         $res.OutputStream.Write($bytes, 0, $bytes.Length)
@@ -140,80 +141,85 @@ while ($listener.IsListening) {
 
     # 2. MT5 Account & Active Positions / Pending Orders State (Deriv #32398784 + Weltrade #43374418)
     if ($path -eq "/api/mt5/account") {
-      if ($req.HttpMethod -eq "POST") {
-        $reader = New-Object System.IO.StreamReader($req.InputStream)
-        $body = $reader.ReadToEnd()
-        $reader.Close()
-        if ($body -and $body.Length -gt 10) {
-          $mt5AccountState = $body
-        }
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true}')
-        $res.ContentType = "application/json"
-        $res.OutputStream.Write($bytes, 0, $bytes.Length)
-        $res.OutputStream.Close()
-        continue
-      } else {
-        $accDerivFile = Join-Path $commonSmcDir "account_deriv.json"
-        $accWtFile    = Join-Path $commonSmcDir "account_weltrade.json"
-        $accMainFile  = Join-Path $commonSmcDir "account_state.json"
+      $accDerivFile = Join-Path $commonSmcDir "account_deriv.json"
+      $accWtFile    = Join-Path $commonSmcDir "account_weltrade.json"
+      $accMainFile  = Join-Path $commonSmcDir "account_state.json"
 
-        $derivObj = $null
-        $wtObj    = $null
-        $mainObj  = $null
+      $derivObj = $null
+      $wtObj    = $null
+      $mainObj  = $null
 
-        if (Test-Path $accDerivFile) {
-          try { $derivObj = [System.IO.File]::ReadAllText($accDerivFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
-        }
-        if (Test-Path $accWtFile) {
-          try { $wtObj = [System.IO.File]::ReadAllText($accWtFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
-        }
-        if (Test-Path $accMainFile) {
-          try { $mainObj = [System.IO.File]::ReadAllText($accMainFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
-        }
-
-        if (-not $derivObj -and $mainObj -and $mainObj.login -eq 32398784) { $derivObj = $mainObj }
-        if (-not $wtObj -and $mainObj -and $mainObj.login -eq 43374418) { $wtObj = $mainObj }
-
-        $combinedOrders = @()
-        if ($derivObj -and $derivObj.orders) {
-          foreach ($o in $derivObj.orders) {
-            $o | Add-Member -NotePropertyName "broker" -NotePropertyValue "deriv" -Force
-            $combinedOrders += $o
-          }
-        }
-        if ($wtObj -and $wtObj.orders) {
-          foreach ($o in $wtObj.orders) {
-            $o | Add-Member -NotePropertyName "broker" -NotePropertyValue "weltrade" -Force
-            $combinedOrders += $o
-          }
-        }
-
-        $primary = if ($derivObj) { $derivObj } elseif ($wtObj) { $wtObj } elseif ($mainObj) { $mainObj } else {
-          @{ login = 32398784; server = "Deriv-Demo"; balance = 9363.52; equity = 9363.52; freeMargin = 9363.52; updated = 0; orders = @() }
-        }
-
-        $payloadObj = @{
-          login      = $primary.login
-          server     = $primary.server
-          balance    = $primary.balance
-          equity     = $primary.equity
-          freeMargin = $primary.freeMargin
-          updated    = $primary.updated
-          orders     = $combinedOrders
-          deriv      = if ($derivObj) { $derivObj } else { @{ broker = "deriv"; login = 32398784; server = "Deriv-Demo"; balance = 9363.52; equity = 9363.52; freeMargin = 9363.52; updated = 0; orders = @() } }
-          weltrade   = if ($wtObj)    { $wtObj }    else { @{ broker = "weltrade"; login = 43374418; server = "Weltrade-Demo"; balance = 9339.86; equity = 9366.36; freeMargin = 9366.36; updated = 0; orders = @() } }
-        }
-
-        $jsonOut = $payloadObj | ConvertTo-Json -Depth 6 -Compress
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonOut)
-        $res.ContentType = "application/json; charset=utf-8"
-        $res.OutputStream.Write($bytes, 0, $bytes.Length)
-        $res.OutputStream.Close()
-        continue
+      if (Test-Path $accDerivFile) {
+        try { $derivObj = [System.IO.File]::ReadAllText($accDerivFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
       }
+      if (Test-Path $accWtFile) {
+        try { $wtObj = [System.IO.File]::ReadAllText($accWtFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
+      }
+      if (Test-Path $accMainFile) {
+        try { $mainObj = [System.IO.File]::ReadAllText($accMainFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
+      }
+
+      if (-not $derivObj -and $mainObj -and $mainObj.login -eq 32398784) { $derivObj = $mainObj }
+      if (-not $wtObj -and $mainObj -and $mainObj.login -eq 43374418) { $wtObj = $mainObj }
+
+      $combinedOrders = @()
+      if ($derivObj -and $derivObj.orders) {
+        foreach ($o in $derivObj.orders) {
+          $o | Add-Member -NotePropertyName "broker" -NotePropertyValue "deriv" -Force
+          $combinedOrders += $o
+        }
+      }
+      if ($wtObj -and $wtObj.orders) {
+        foreach ($o in $wtObj.orders) {
+          $o | Add-Member -NotePropertyName "broker" -NotePropertyValue "weltrade" -Force
+          $combinedOrders += $o
+        }
+      }
+
+      $primary = if ($derivObj) { $derivObj } elseif ($wtObj) { $wtObj } elseif ($mainObj) { $mainObj } else {
+        @{ login = 32398784; server = "Deriv-Demo"; balance = 9363.52; equity = 9363.52; freeMargin = 9363.52; updated = 0; orders = @() }
+      }
+
+      $payloadObj = @{
+        login      = $primary.login
+        server     = $primary.server
+        balance    = $primary.balance
+        equity     = $primary.equity
+        freeMargin = $primary.freeMargin
+        updated    = $primary.updated
+        orders     = $combinedOrders
+        deriv      = if ($derivObj) { $derivObj } else { @{ broker = "deriv"; login = 32398784; server = "Deriv-Demo"; balance = 9363.52; equity = 9363.52; freeMargin = 9363.52; updated = 0; orders = @() } }
+        weltrade   = if ($wtObj)    { $wtObj }    else { @{ broker = "weltrade"; login = 43374418; server = "Weltrade-Demo"; balance = 500.00; equity = 500.00; freeMargin = 500.00; updated = 0; orders = @() } }
+      }
+
+      $jsonOut = $payloadObj | ConvertTo-Json -Depth 6 -Compress
+      $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonOut)
+      $res.ContentType = "application/json; charset=utf-8"
+      $res.OutputStream.Write($bytes, 0, $bytes.Length)
+      $res.OutputStream.Close()
+      continue
     }
 
-    # 3. MT5 Command Queue (Routes to Deriv #32398784 or Weltrade #43374418)
+    # 3. Live 1-Second MT5 Bid/Ask Quotes for All Symbols (/api/mt5/quotes)
+    if ($path -eq "/api/mt5/quotes") {
+      $qDerivFile = Join-Path $commonSmcDir "quotes_deriv.json"
+      $qWtFile    = Join-Path $commonSmcDir "quotes_weltrade.json"
+      $qDeriv = "{}"
+      $qWt    = "{}"
+      if (Test-Path $qDerivFile) { try { $qDeriv = [System.IO.File]::ReadAllText($qDerivFile, [System.Text.Encoding]::UTF8) } catch {} }
+      if (Test-Path $qWtFile)    { try { $qWt    = [System.IO.File]::ReadAllText($qWtFile, [System.Text.Encoding]::UTF8) } catch {} }
+      if ([string]::IsNullOrWhiteSpace($qDeriv)) { $qDeriv = "{}" }
+      if ([string]::IsNullOrWhiteSpace($qWt))    { $qWt    = "{}" }
+
+      $json = '{"deriv":' + $qDeriv + ',"weltrade":' + $qWt + '}'
+      $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+      $res.ContentType = "application/json; charset=utf-8"
+      $res.OutputStream.Write($bytes, 0, $bytes.Length)
+      $res.OutputStream.Close()
+      continue
+    }
+
+    # 4. MT5 Command Queue (Routes to Deriv #32398784 or Weltrade #43374418)
     if ($path -eq "/api/mt5/command" -and $req.HttpMethod -eq "POST") {
       $reader = New-Object System.IO.StreamReader($req.InputStream)
       $body = $reader.ReadToEnd()
@@ -248,43 +254,21 @@ while ($listener.IsListening) {
       continue
     }
 
-    # 4. MT5 Candle Push
-    if ($path -eq "/api/mt5/push" -and $req.HttpMethod -eq "POST") {
-      $sym = $req.QueryString["symbol"]
-      $tf  = $req.QueryString["tf"]
-      $reader = New-Object System.IO.StreamReader($req.InputStream)
-      $body = $reader.ReadToEnd()
-      $reader.Close()
-      if ($sym -and $tf) {
-        $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-        $candidates = if ($allLookup.ContainsKey($sym)) { $allLookup[$sym] } else { @($sym) }
-        foreach ($c in $candidates) {
-          $mt5Cache["$c|$tf"] = $body
-          $mt5Meta[$c] = @{ updated = $now }
-        }
-      }
-      $bytes = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true}')
-      $res.ContentType = "application/json"
-      $res.OutputStream.Write($bytes, 0, $bytes.Length)
-      $res.OutputStream.Close()
-      continue
-    }
-
     # 5. MT5 Active Symbols
     if ($path -eq "/api/mt5/symbols") {
-      foreach ($dirPath in @($commonSmcDir, $commonCrtDir)) {
-        if (Test-Path $dirPath) {
-          Get-ChildItem $dirPath -Filter "*_*.json" -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "account_state.json" } | ForEach-Object {
-            $baseName = $_.BaseName
-            $idx = $baseName.LastIndexOf('_')
-            if ($idx -gt 0) {
-              $sName = $baseName.Substring(0, $idx)
-              $ts = [int][DateTimeOffset]::new($_.LastWriteTimeUtc).ToUnixTimeSeconds()
-              $mt5Meta[$sName] = @{ updated = $ts }
-              if ($allLookup.ContainsKey($sName)) {
-                foreach ($alias in $allLookup[$sName]) {
-                  $mt5Meta[$alias] = @{ updated = $ts }
-                }
+      if (Test-Path $commonSmcDir) {
+        Get-ChildItem $commonSmcDir -Filter "*_*.json" -ErrorAction SilentlyContinue | Where-Object {
+          $_.Name -notmatch "^(account|catalog|quotes)_"
+        } | ForEach-Object {
+          $baseName = $_.BaseName
+          $idx = $baseName.LastIndexOf('_')
+          if ($idx -gt 0) {
+            $sName = $baseName.Substring(0, $idx)
+            $ts = [int][DateTimeOffset]::new($_.LastWriteTimeUtc).ToUnixTimeSeconds()
+            $mt5Meta[$sName] = @{ updated = $ts }
+            if ($allLookup.ContainsKey($sName)) {
+              foreach ($alias in $allLookup[$sName]) {
+                $mt5Meta[$alias] = @{ updated = $ts }
               }
             }
           }
@@ -311,44 +295,44 @@ while ($listener.IsListening) {
       continue
     }
 
-    # 6. MT5 Candles
+    # 6. MT5 Candles (ALWAYS reads fresh from disk + signals 1s priority to MT5 EA)
     if ($path -eq "/api/mt5/candles") {
-      $sym = $req.QueryString["symbol"]
-      $tf  = [int]($req.QueryString["tf"] -as [int])
+      $sym  = $req.QueryString["symbol"]
+      $kind = $req.QueryString["kind"]
+      $tf   = [int]($req.QueryString["tf"] -as [int])
       if (-not $tf) { $tf = 300 }
+
+      # Notify MT5 EA to prioritize 1-second sync for the active chart symbol
+      if ($sym -and ($kind -eq "live" -or $kind -eq "full")) {
+        $isWtSym = ($sym -match "Pain|Gain|Flip|Switch|BreakX|FX Vol|SFX Vol")
+        $prioFile = Join-Path $commonSmcDir (if ($isWtSym) { "active_weltrade.txt" } else { "active_deriv.txt" })
+        try { [System.IO.File]::WriteAllText($prioFile, $sym, [System.Text.Encoding]::ASCII) } catch {}
+      }
 
       $candidates = if ($allLookup.ContainsKey($sym)) { $allLookup[$sym] } else { @($sym) }
       $json = "[]"
 
-      foreach ($c in $candidates) {
-        $key = "$c|$tf"
-        if ($mt5Cache.ContainsKey($key)) {
-          $json = $mt5Cache[$key]
-          break
-        }
-      }
-
-      if ($json -eq "[]") {
-        foreach ($dirPath in @($commonSmcDir, $commonCrtDir)) {
-          if (Test-Path $dirPath) {
-            foreach ($c in $candidates) {
-              $safeC = $c -replace '[^A-Za-z0-9_-]', '_'
-              $fPath = Join-Path $dirPath "${safeC}_${tf}.json"
-              if (Test-Path $fPath) {
-                try {
-                  $json = [System.IO.File]::ReadAllText($fPath, [System.Text.Encoding]::UTF8)
-                  $mt5Cache["$sym|$tf"] = $json
-                  break
-                } catch {}
+      # Try reading directly from disk; if file doesn't exist yet, wait up to 1.2s for 1s MT5 timer to export it
+      for ($attempt = 0; $attempt -lt 6; $attempt++) {
+        foreach ($c in $candidates) {
+          $safeC = $c -replace '[^A-Za-z0-9_-]', '_'
+          $fPath = Join-Path $commonSmcDir "${safeC}_${tf}.json"
+          if (Test-Path $fPath) {
+            try {
+              $raw = [System.IO.File]::ReadAllText($fPath, [System.Text.Encoding]::UTF8)
+              if ($raw -and $raw.Length -gt 10) {
+                $json = $raw
+                break
               }
-            }
+            } catch {}
           }
-          if ($json -ne "[]") { break }
         }
+        if ($json -ne "[]") { break }
+        Start-Sleep -Milliseconds 200
       }
 
       $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-      $res.ContentType = "application/json"
+      $res.ContentType = "application/json; charset=utf-8"
       $res.OutputStream.Write($bytes, 0, $bytes.Length)
       $res.OutputStream.Close()
       continue
