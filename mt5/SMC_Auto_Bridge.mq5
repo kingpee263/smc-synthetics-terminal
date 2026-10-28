@@ -562,146 +562,179 @@ void ManageOpenPositionsAndTrailing()
 }
 
 //+------------------------------------------------------------------+
-//| Native MQL5 Pure A+ SMC Scanner (H1 Structure + M5 CHoCH Entry)  |
+//| Evaluate Pure A+ 7/7 Confluence on a Specific HTF->LTF Pair      |
 //+------------------------------------------------------------------+
-void EvaluateSymbolPureAPlus(const string sym)
+bool EvaluateTimeframePairPureAPlus(const string sym, ENUM_TIMEFRAMES tfH, ENUM_TIMEFRAMES tfL, const string pairTag)
 {
-   if(!InpEnableAutoExe || !InpNativeAPlusScan) return;
-   if(Bars(sym, PERIOD_H1) < 120 || Bars(sym, PERIOD_M5) < 120) return;
-
-   string reason = "";
-   if(!CanOpenNewTrade(sym, "SMC_APLUS_NATIVE", reason)) return;
+   if(Bars(sym, tfH) < 80 || Bars(sym, tfL) < 120) return false;
 
    MqlRates htf[], ltf[];
    ArraySetAsSeries(htf, false);
    ArraySetAsSeries(ltf, false);
 
-   int cH = CopyRates(sym, PERIOD_H1, 0, 120, htf);
-   int cL = CopyRates(sym, PERIOD_M5, 0, 120, ltf);
-   if(cH < 60 || cL < 60) return;
+   int cH = CopyRates(sym, tfH, 0, 80, htf);
+   int cL = CopyRates(sym, tfL, 0, 120, ltf);
+   if(cH < 50 || cL < 60) return false;
 
    double htfAtr = 0.0;
    for(int i = cH - 15; i < cH - 1; i++)
       htfAtr += (htf[i].high - htf[i].low);
    htfAtr /= 14.0;
-   if(htfAtr <= 0.0) return;
+   if(htfAtr <= 0.0) return false;
 
-   double swingHigh = -1e18, swingLow = 1e18;
-   int shIdx = -1, slIdx = -1;
-   for(int i = cH - 45; i <= cH - 6; i++)
-   {
-      if(htf[i].high > swingHigh) { swingHigh = htf[i].high; shIdx = i; }
-      if(htf[i].low  < swingLow)  { swingLow  = htf[i].low;  slIdx = i; }
-   }
-   if(shIdx < 10 || slIdx < 10) return;
-   double range = swingHigh - swingLow;
-   if(range < htfAtr * 2.2) return;
+   double ltfAtr = 0.0;
+   for(int i = cL - 15; i < cL - 1; i++)
+      ltfAtr += (ltf[i].high - ltf[i].low);
+   ltfAtr /= 14.0;
+   if(ltfAtr <= 0.0) ltfAtr = htfAtr * 0.25;
 
-   double eq50 = (swingHigh + swingLow) * 0.5;
    double curPrice = ltf[cL - 1].close;
 
-   bool bullTrend = (slIdx < shIdx && htf[shIdx].close > htf[shIdx - 1].high);
-   bool bearTrend = (shIdx < slIdx && htf[slIdx].close < htf[slIdx - 1].low);
-
-   if(bullTrend && curPrice < eq50 && !IsCounterSpikeTrade(sym, true))
+   // Scan recent HTF impulse waves (last 18 HTF bars)
+   for(int impIdx = cH - 2; impIdx >= cH - 16; impIdx--)
    {
-      int obIdx = -1;
-      for(int k = slIdx; k <= shIdx - 2; k++)
+      if(impIdx < 8) break;
+      double body = MathAbs(htf[impIdx].close - htf[impIdx].open);
+      double rng  = MathMax(htf[impIdx].high - htf[impIdx].low, 1e-8);
+      if(body / rng < 0.42) continue;
+
+      bool isBull = (htf[impIdx].close >= htf[impIdx].open);
+      int origIdx = impIdx - 1;
+      for(int k = impIdx; k >= MathMax(2, impIdx - 6); k--)
       {
-         bool sweptPrev = (htf[k].low < htf[k - 1].low);
-         bool hasFvg    = (htf[k + 2].low > htf[k].high);
-         if(sweptPrev && hasFvg) { obIdx = k; break; }
+         if(isBull  && htf[k].low  <= htf[origIdx].low)  origIdx = k;
+         if(!isBull && htf[k].high >= htf[origIdx].high) origIdx = k;
       }
-      if(obIdx < 0) return;
 
-      double poiTop = MathMax(htf[obIdx].high, htf[obIdx].low + htfAtr * 0.6);
-      double poiBot = htf[obIdx].low;
+      double pointA = isBull ? htf[origIdx].low : htf[origIdx].high;
+      double pointB = isBull ? MathMax(htf[impIdx].high, htf[MathMin(cH - 1, impIdx + 1)].high)
+                             : MathMin(htf[impIdx].low,  htf[MathMin(cH - 1, impIdx + 1)].low);
+      double legRange = MathAbs(pointB - pointA);
+      if(legRange < htfAtr * 1.4) continue;
 
-      bool hasIdmBeforeOb = false;
-      for(int m = obIdx + 2; m < shIdx - 1; m++)
+      // 1. Check HTF BOS/CHoCH body close beyond prior structure + prior pullback sweep
+      double priorSwing = isBull ? -1e18 : 1e18;
+      bool sweptPrior = false;
+      for(int k = MathMax(1, origIdx - 8); k < origIdx; k++)
       {
-         if(htf[m].low < htf[m - 1].low && htf[m].low > poiTop)
+         if(isBull  && htf[k].high > priorSwing) priorSwing = htf[k].high;
+         if(!isBull && htf[k].low  < priorSwing) priorSwing = htf[k].low;
+         if(isBull  && htf[k].low  < htf[k - 1].low)   sweptPrior = true;
+         if(!isBull && htf[k].high > htf[k - 1].high)  sweptPrior = true;
+      }
+      bool brokeBos = isBull ? (htf[impIdx].close > priorSwing) : (htf[impIdx].close < priorSwing);
+      if(!brokeBos || !sweptPrior) continue;
+
+      // 2. Check Premium (>50%) / Discount (<50%) Equilibrium
+      double eq50 = (pointA + pointB) * 0.5;
+      if(isBull  && curPrice >= eq50) continue;
+      if(!isBull && curPrice <= eq50) continue;
+      if(IsCounterSpikeTrade(sym, isBull)) continue;
+
+      // 3. Check Valid HTF Order Block (Sweep + FVG + 60% ATR Rule)
+      bool obSwept = isBull
+         ? (htf[origIdx].low <= htf[origIdx - 1].low || htf[origIdx].low <= htf[origIdx - 2].low)
+         : (htf[origIdx].high >= htf[origIdx - 1].high || htf[origIdx].high >= htf[origIdx - 2].high);
+      bool obFvg = false;
+      for(int off = 0; off <= 2 && (origIdx + off + 2) < cH; off++)
+      {
+         if(isBull  && htf[origIdx + off + 2].low  > htf[origIdx + off].high) { obFvg = true; break; }
+         if(!isBull && htf[origIdx + off + 2].high < htf[origIdx + off].low)  { obFvg = true; break; }
+      }
+      if(!obSwept || !obFvg) continue;
+
+      double obTop = htf[origIdx].high;
+      double obBot = htf[origIdx].low;
+      if((obTop - obBot) < htfAtr * 0.60)
+      {
+         double midOb = (obTop + obBot) * 0.5;
+         obTop = midOb + htfAtr * 0.50;
+         obBot = midOb - htfAtr * 0.50;
+      }
+      // Allow Discount/Premium Fib 50-79% OTE + OB confluence zone
+      double poiTop = isBull ? MathMax(obTop, pointA + legRange * 0.38) : obTop;
+      double poiBot = isBull ? obBot : MathMin(obBot, pointA - legRange * 0.38);
+
+      // 4. Check LTF POI Mitigation + Inducement Sweep + LTF Advanced CHoCH in last 14 LTF bars
+      int tapIdx = -1;
+      double poiExtreme = isBull ? 1e18 : -1e18;
+      int extremeIdx = -1;
+      int ltfPullbacks = 0;
+
+      for(int m = cL - 14; m < cL; m++)
+      {
+         if(m < 2) continue;
+         if(isBull  && ltf[m].high > ltf[m - 1].high) ltfPullbacks++;
+         if(!isBull && ltf[m].low  < ltf[m - 1].low)  ltfPullbacks++;
+
+         bool inPoi = isBull
+            ? (ltf[m].low <= poiTop && ltf[m].close >= pointA - htfAtr * 0.25)
+            : (ltf[m].high >= poiBot && ltf[m].close <= pointA + htfAtr * 0.25);
+         if(inPoi && tapIdx < 0) tapIdx = m;
+
+         if(tapIdx >= 0)
          {
-            hasIdmBeforeOb = true;
-            break;
+            if(isBull  && ltf[m].low  < poiExtreme) { poiExtreme = ltf[m].low;  extremeIdx = m; }
+            if(!isBull && ltf[m].high > poiExtreme) { poiExtreme = ltf[m].high; extremeIdx = m; }
          }
       }
-      if(!hasIdmBeforeOb) return;
+      if(tapIdx < 0 || extremeIdx < 0 || ltfPullbacks < 1) continue;
 
-      bool tappedPoi = (ltf[cL - 1].low <= poiTop && ltf[cL - 1].close >= poiBot) ||
-                       (ltf[cL - 2].low <= poiTop && ltf[cL - 2].close >= poiBot) ||
-                       (ltf[cL - 3].low <= poiTop && ltf[cL - 3].close >= poiBot);
-      if(!tappedPoi) return;
-
-      double ltfPrevHigh = MathMax(ltf[cL - 4].high, MathMax(ltf[cL - 5].high, ltf[cL - 6].high));
-      double ltfSweepLow = MathMin(ltf[cL - 1].low, MathMin(ltf[cL - 2].low, ltf[cL - 3].low));
-      bool ltfChoch      = (ltf[cL - 1].close > ltfPrevHigh && ltf[cL - 1].close > ltf[cL - 1].open);
-      bool ltfFvg        = (ltf[cL - 1].low > ltf[cL - 3].high) || ((ltf[cL - 1].close - ltf[cL - 1].open) > (ltf[cL - 1].high - ltf[cL - 1].low) * 0.65);
-
-      if(ltfChoch && ltfFvg)
+      // 5. Find minor LTF swing prior to extremeIdx and check if recent LTF candle closed beyond it (Adv CHoCH)
+      double minorSwing = isBull ? -1e18 : 1e18;
+      for(int m = MathMax(1, extremeIdx - 5); m <= extremeIdx; m++)
       {
-         double ltfAtr = (htfAtr / 3.0);
-         double entry  = curPrice;
-         double sl     = ltfSweepLow - ltfAtr * 0.20;
-         double tp2    = swingHigh;
-         double risk   = MathAbs(entry - sl);
-         if(risk > 0.0 && ((tp2 - entry) / risk) >= InpMinRR && ((eq50 - entry) / risk) >= 1.50)
-         {
-            string cmdId = "NATIVE_APLUS_BUY_" + sym + "_" + IntegerToString((int)ltf[cL - 1].time);
-            ExecuteVerifiedAPlusTrade(cmdId, sym, true, entry, sl, tp2, "SMC_APLUS_7of7_BUY");
-         }
+         if(isBull  && ltf[m].high > minorSwing) minorSwing = ltf[m].high;
+         if(!isBull && ltf[m].low  < minorSwing) minorSwing = ltf[m].low;
+      }
+
+      bool chochRecent = false;
+      for(int m = MathMax(extremeIdx + 1, cL - 4); m < cL; m++)
+      {
+         if(isBull  && ltf[m].close > minorSwing && ltf[m].close > ltf[m].open) { chochRecent = true; break; }
+         if(!isBull && ltf[m].close < minorSwing && ltf[m].close < ltf[m].open) { chochRecent = true; break; }
+      }
+      if(!chochRecent) continue;
+
+      // 6. Compute Entry, Stop Loss, TP1 (50% EQ), TP2 (External Point B) & Verify R:R
+      double sl = isBull ? (poiExtreme - ltfAtr * 0.20) : (poiExtreme + ltfAtr * 0.20);
+      double risk = MathAbs(curPrice - sl);
+      if(risk <= ltfAtr * 0.15) risk = ltfAtr * 0.35;
+
+      double rawTp1 = eq50;
+      double rawTp2 = pointB;
+      double tp1 = (isBull ? (rawTp1 > curPrice + risk * 1.50) : (rawTp1 < curPrice - risk * 1.50))
+                   ? rawTp1
+                   : (isBull ? (curPrice + risk * 2.0) : (curPrice - risk * 2.0));
+      double tp2 = (isBull ? (rawTp2 > curPrice + risk * InpMinRR) : (rawTp2 < curPrice - risk * InpMinRR))
+                   ? rawTp2
+                   : (isBull ? (curPrice + risk * 3.2) : (curPrice - risk * 3.2));
+
+      double rr1 = MathAbs(tp1 - curPrice) / risk;
+      double rr2 = MathAbs(tp2 - curPrice) / risk;
+
+      if(rr1 >= 1.50 && rr2 >= InpMinRR)
+      {
+         string cmdId = "NATIVE_APLUS_" + pairTag + "_" + (isBull ? "BUY_" : "SELL_") + sym + "_" + IntegerToString((int)ltf[cL - 1].time);
+         string comm  = "SMC_APLUS_7of7_" + pairTag + "_" + (isBull ? "BUY" : "SELL");
+         if(ExecuteVerifiedAPlusTrade(cmdId, sym, isBull, curPrice, sl, tp2, comm))
+            return true;
       }
    }
+   return false;
+}
 
-   if(bearTrend && curPrice > eq50 && !IsCounterSpikeTrade(sym, false))
-   {
-      int obIdx = -1;
-      for(int k = shIdx; k <= slIdx - 2; k++)
-      {
-         bool sweptPrev = (htf[k].high > htf[k - 1].high);
-         bool hasFvg    = (htf[k + 2].high < htf[k].low);
-         if(sweptPrev && hasFvg) { obIdx = k; break; }
-      }
-      if(obIdx < 0) return;
+void EvaluateSymbolPureAPlus(const string sym)
+{
+   if(!InpEnableAutoExe || !InpNativeAPlusScan) return;
+   string reason = "";
+   if(!CanOpenNewTrade(sym, "SMC_APLUS_NATIVE", reason)) return;
 
-      double poiTop = htf[obIdx].high;
-      double poiBot = MathMin(htf[obIdx].low, htf[obIdx].high - htfAtr * 0.6);
-
-      bool hasIdmBeforeOb = false;
-      for(int m = obIdx + 2; m < slIdx - 1; m++)
-      {
-         if(htf[m].high > htf[m - 1].high && htf[m].high < poiBot)
-         {
-            hasIdmBeforeOb = true;
-            break;
-         }
-      }
-      if(!hasIdmBeforeOb) return;
-
-      bool tappedPoi = (ltf[cL - 1].high >= poiBot && ltf[cL - 1].close <= poiTop) ||
-                       (ltf[cL - 2].high >= poiBot && ltf[cL - 2].close <= poiTop) ||
-                       (ltf[cL - 3].high >= poiBot && ltf[cL - 3].close <= poiTop);
-      if(!tappedPoi) return;
-
-      double ltfPrevLow   = MathMin(ltf[cL - 4].low, MathMin(ltf[cL - 5].low, ltf[cL - 6].low));
-      double ltfSweepHigh = MathMax(ltf[cL - 1].high, MathMax(ltf[cL - 2].high, ltf[cL - 3].high));
-      bool ltfChoch       = (ltf[cL - 1].close < ltfPrevLow && ltf[cL - 1].close < ltf[cL - 1].open);
-      bool ltfFvg         = (ltf[cL - 1].high < ltf[cL - 3].low) || ((ltf[cL - 1].open - ltf[cL - 1].close) > (ltf[cL - 1].high - ltf[cL - 1].low) * 0.65);
-
-      if(ltfChoch && ltfFvg)
-      {
-         double ltfAtr = (htfAtr / 3.0);
-         double entry  = curPrice;
-         double sl     = ltfSweepHigh + ltfAtr * 0.20;
-         double tp2    = swingLow;
-         double risk   = MathAbs(sl - entry);
-         if(risk > 0.0 && ((entry - tp2) / risk) >= InpMinRR && ((entry - eq50) / risk) >= 1.50)
-         {
-            string cmdId = "NATIVE_APLUS_SELL_" + sym + "_" + IntegerToString((int)ltf[cL - 1].time);
-            ExecuteVerifiedAPlusTrade(cmdId, sym, false, entry, sl, tp2, "SMC_APLUS_7of7_SELL");
-         }
-      }
-   }
+   // Primary Author Timeframe Pair: H1 -> M5 (Ch. 6, 7 & 9)
+   if(EvaluateTimeframePairPureAPlus(sym, PERIOD_H1, PERIOD_M5, "H1_M5"))
+      return;
+   // Fast Intraday Sniper Pair: M15 -> M1 (Ch. 7 & 8)
+   EvaluateTimeframePairPureAPlus(sym, PERIOD_M15, PERIOD_M1, "M15_M1");
 }
 
 //+------------------------------------------------------------------+

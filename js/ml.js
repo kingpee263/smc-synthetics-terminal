@@ -283,19 +283,18 @@
   function isLiveAutoExecutable(series, setup, mlPred) {
     if (!isPureSignal(series?.market, setup, mlPred)) return false;
     if (setup.state !== 'WAIT_TRIGGER' && setup.state !== 'IN_TRADE') return false;
-    // If already IN_TRADE, must have triggered within the last 3 LTF bars
-    if (setup.state === 'IN_TRADE' && (setup.barsSinceEntry == null || setup.barsSinceEntry > 3)) return false;
+    if (setup.barsSinceEntry != null && setup.barsSinceEntry > 12) return false;
     const ltf = series?.ltf || [];
     if (!ltf.length) return false;
     const lastPrice = ltf[ltf.length - 1].close;
-    const risk = Math.max(Math.abs(setup.entry - setup.sl), 1e-6);
-    // Current price must not have already run past 50% of the way to TP1 or breached SL
+    const tp1Dist = Math.abs(setup.tp1 - setup.entry);
+    // Current price must not have breached SL or already moved >55% of the way to TP1
     if (setup.isBear) {
       if (lastPrice >= setup.sl || lastPrice <= setup.tp1) return false;
-      if (Math.abs(lastPrice - setup.entry) > risk * 0.65) return false;
+      if (setup.entry - lastPrice > tp1Dist * 0.55) return false;
     } else {
       if (lastPrice <= setup.sl || lastPrice >= setup.tp1) return false;
-      if (Math.abs(lastPrice - setup.entry) > risk * 0.65) return false;
+      if (lastPrice - setup.entry > tp1Dist * 0.55) return false;
     }
     return true;
   }

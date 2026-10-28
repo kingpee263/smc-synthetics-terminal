@@ -105,7 +105,7 @@
    * when their wicks do NOT overlap.
    */
   function getImbalanceAfter(candles, idx, isBullOB) {
-    for (let offset = 0; offset <= 1; offset++) {
+    for (let offset = 0; offset <= 3; offset++) {
       const c1 = candles[idx + offset];
       const c3 = candles[idx + offset + 2];
       if (!c1 || !c3) continue;
@@ -128,10 +128,13 @@
    */
   function buildOrderBlockZone(candles, obIdx, isBullOB) {
     const c = candles[obIdx];
-    const prev = candles[Math.max(0, obIdx - 1)];
+    const prev1 = candles[Math.max(0, obIdx - 1)];
+    const prev2 = candles[Math.max(0, obIdx - 2)];
     const a = atr(candles, obIdx, 14);
-    const sweptPrev = isBullOB ? (c.low < prev.low) : (c.high > prev.high);
-    const fvg = getImbalanceAfter(candles, obIdx, isBullOB);
+    const sweptPrev = isBullOB
+      ? (c.low <= prev1.low || c.low <= prev2.low)
+      : (c.high >= prev1.high || c.high >= prev2.high);
+    const fvg = getImbalanceAfter(candles, Math.max(0, obIdx - 1), isBullOB);
 
     let top = c.high;
     let bottom = c.low;
@@ -439,6 +442,7 @@
     for (let k = Math.max(1, tbs - 8); k <= tbs; k++) {
       if (isValidPullbackAt(ltf, k, !isBullLeg)) ltfPullbacks++;
     }
+    if (ltfPullbacks >= 1) sweptIdm = true;
 
     // Detect Liquidity Model (Ch. 3: EQH/EQL, Trendline Liquidity, Sideways Range, or IDM)
     const liqModel = detectLiquidityModel(ltf, Math.max(0, s - 5), tbs, isBullLeg);
@@ -572,23 +576,24 @@
     };
 
     if (state) return { ...setup, state, invalidReason };
-    if (entry < 0) {
+    if (entry < 0 && ref < 0) {
       const dataEnded = endK === ltf.length;
-      return { ...setup, state: dataEnded ? (ref >= 0 ? 'WAIT_TRIGGER' : 'WAIT_MODEL1') : 'EXPIRED' };
+      return { ...setup, state: dataEnded ? 'WAIT_MODEL1' : 'EXPIRED' };
     }
 
+    const activeIdx = entry >= 0 ? entry : ref;
     // Step 5 (Ch. 7 & 8): Calculate Entry, Stop Loss (with 60% ATR rule & Spike protection), TP1 (50% EQ), TP2 (External High/Low B)
-    const a = atr(ltf, entry, 14);
+    const a = atr(ltf, activeIdx, 14);
     let buffer = o.slBufferATR * a;
     const againstSpike = (market.spike === 'up' && isBear) || (market.spike === 'down' && !isBear);
     if (againstSpike) buffer += o.spikeBufferATR * a;
 
     // Entry at LTF Order Block proximal edge (Ch. 7) or Trigger Close
-    let entryP = ltf[entry].close;
+    let entryP = ltf[activeIdx].close;
     if (ltfObZone) {
       entryP = isBear
-        ? Math.min(ltf[entry].high, Math.max(ltfObZone.bottom, ltf[entry].close))
-        : Math.max(ltf[entry].low, Math.min(ltfObZone.top, ltf[entry].close));
+        ? Math.min(ltf[activeIdx].high, Math.max(ltfObZone.bottom, ltf[activeIdx].close))
+        : Math.max(ltf[activeIdx].low, Math.min(ltfObZone.top, ltf[activeIdx].close));
     }
 
     const sl = isBear ? Math.max(poiExtreme, ltfObZone ? ltfObZone.top : poiExtreme) + buffer
@@ -609,9 +614,9 @@
 
     const rr1 = risk > 0 ? Math.abs(entryP - tp1) / risk : 0;
     const rr2 = risk > 0 ? Math.abs(entryP - tp2) / risk : 0;
-    const barsSinceEntry = Math.max(0, ltf.length - 1 - entry);
+    const barsSinceEntry = Math.max(0, ltf.length - 1 - activeIdx);
 
-    Object.assign(setup, { entryIdx: entry, barsSinceEntry, entry: entryP, sl, tp1, tp2, risk, rr1, rr2, againstSpike, atr: a });
+    Object.assign(setup, { entryIdx: activeIdx, barsSinceEntry, entry: entryP, sl, tp1, tp2, risk, rr1, rr2, againstSpike, atr: a });
 
     // Discount / Premium Fib OTE Zone (50% - 79% Fib - Ch. 3 Fig 3.12)
     const leg = Math.abs(crth - crtl);
@@ -623,11 +628,16 @@
       const reactC = ltf[cbsIdx - 1];
       setup.kod = { idx: cbsIdx, price: isBear ? reactC.low : reactC.high };
     } else {
-      setup.kod = { idx: entry, price: ltf[entry].close };
+      setup.kod = { idx: activeIdx, price: ltf[activeIdx].close };
     }
 
     if (rr1 < o.minRR) {
       return { ...setup, state: 'LOW_RR', invalidReason: `Reward-to-Risk 1:${rr1.toFixed(2)} below minimum A+ threshold (1:${o.minRR.toFixed(2)})` };
+    }
+
+    if (entry < 0) {
+      const dataEnded = endK === ltf.length;
+      return { ...setup, state: dataEnded ? 'WAIT_TRIGGER' : 'EXPIRED' };
     }
 
     // Simulate trade lifecycle & X1/X2/X3 trailing stops (Ch. 7 Fig 7.4)

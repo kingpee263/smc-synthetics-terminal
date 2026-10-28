@@ -312,23 +312,18 @@ while ($listener.IsListening) {
       $candidates = if ($allLookup.ContainsKey($sym)) { $allLookup[$sym] } else { @($sym) }
       $json = "[]"
 
-      # Try reading directly from disk; if file doesn't exist yet, wait up to 1.2s for 1s MT5 timer to export it
-      for ($attempt = 0; $attempt -lt 6; $attempt++) {
-        foreach ($c in $candidates) {
-          $safeC = $c -replace '[^A-Za-z0-9_-]', '_'
-          $fPath = Join-Path $commonSmcDir "${safeC}_${tf}.json"
-          if (Test-Path $fPath) {
-            try {
-              $raw = [System.IO.File]::ReadAllText($fPath, [System.Text.Encoding]::UTF8)
-              if ($raw -and $raw.Length -gt 10) {
-                $json = $raw
-                break
-              }
-            } catch {}
-          }
+      foreach ($c in $candidates) {
+        $safeC = $c -replace '[^A-Za-z0-9_-]', '_'
+        $fPath = Join-Path $commonSmcDir "${safeC}_${tf}.json"
+        if (Test-Path $fPath) {
+          try {
+            $raw = [System.IO.File]::ReadAllText($fPath, [System.Text.Encoding]::UTF8)
+            if ($raw -and $raw.Length -gt 10) {
+              $json = $raw
+              break
+            }
+          } catch {}
         }
-        if ($json -ne "[]") { break }
-        Start-Sleep -Milliseconds 200
       }
 
       $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
