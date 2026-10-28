@@ -242,7 +242,8 @@
 
     const brokerAcc = getBrokerAccount(market);
     const liveEq = brokerAcc?.equity || brokerAcc?.balance || state.balance;
-    const pos = ML.calcPositionForAccount(market, setup.entry, setup.sl, setup.tp1, setup.tp2, liveEq, state.riskPct);
+    const adaptive = ML.computeAdaptiveRisk ? ML.computeAdaptiveRisk(state.riskPct, brokerAcc, setup, mlPred) : { riskPct: state.riskPct, mode: `STANDARD (${state.riskPct}%)` };
+    const pos = ML.calcPositionForAccount(market, setup.entry, setup.sl, setup.tp1, setup.tp2, liveEq, adaptive.riskPct);
 
     // STRICT AUTO-EXECUTION: Only dispatch when mlPred.isLiveSignal === true (Pure A+, 7/7 checks, fresh trigger <= 3 bars, inside OB entry window)
     if (state.autoTradeEnabled && mlPred.isLiveSignal) {
@@ -1047,7 +1048,8 @@
       const acc = getBrokerAccount(market);
       const isWt = isWeltradeMarket(market);
       const liveEq = acc?.equity || acc?.balance || state.balance;
-      const pos = ML.calcPositionForAccount(market, activeLvls.entry, activeLvls.sl, activeLvls.tp1, activeLvls.tp2, liveEq, state.riskPct);
+      const adaptive = ML.computeAdaptiveRisk ? ML.computeAdaptiveRisk(state.riskPct, acc, setup, mlPred) : { riskPct: state.riskPct, mode: `STANDARD (${state.riskPct}%)` };
+      const pos = ML.calcPositionForAccount(market, activeLvls.entry, activeLvls.sl, activeLvls.tp1, activeLvls.tp2, liveEq, adaptive.riskPct);
       const riskCheck = ML.evaluatePortfolioRisk(market, pos, acc, {
         maxOpenTrades: state.maxOpenTrades,
         maxRiskPerTradePct: state.maxRiskPerTradePct,
@@ -1057,6 +1059,12 @@
       const brokerLabel = isWt
         ? `#${acc?.login || '43374418'} (${acc?.server || 'Weltrade-Demo'})`
         : `#${acc?.login || '32398784'} (${acc?.server || 'Deriv-Demo'})`;
+      const sh = mlPred?.spikeHazard;
+      const spikeHazardHtml = sh && sh.isSpikeIndex
+        ? `<div style="margin-top:3px; padding:3px 6px; border-radius:4px; background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.22); color:${sh.hazardPct >= 75 ? '#fbbf24' : '#38bdf8'};">
+             <b>${sh.label}</b> · ${sh.barsSinceSpike} bars (~${sh.estTicksSinceSpike}/${sh.expectedInterval} ticks since spike)
+           </div>`
+        : '';
       const openOrdersHtml = acc && Array.isArray(acc.orders) && acc.orders.length
         ? `<div style="margin-top:4px; padding-top:4px; border-top:1px solid var(--border); color:#26a69a;"><b>Active ${isWt ? 'Weltrade' : 'Deriv'} Positions (${acc.orders.length}/${state.maxOpenTrades}):</b> ` +
           acc.orders.map(o => `#${o.ticket} ${o.symbol} ${o.side} ${o.lot} lot (${o.profit >= 0 ? '+' : ''}$${Number(o.profit).toFixed(2)})`).join(' · ') + `</div>`
@@ -1070,10 +1078,11 @@
         riskDetails.innerHTML = `
           <div>${isWt ? 'Weltrade' : 'Deriv'} MT5: <b>${brokerLabel}</b> · Equity: <b>$${liveEq.toFixed(2)}</b></div>
           <div>Auto-Gate: <b style="color:${isPureAPlus ? '#26a69a' : '#f23645'};">${isPureAPlus ? 'PURE A+ VERIFIED (7/7 Rules)' : `REGULAR SETUP BLOCKED (Grade ${setup.grade || 'C'} — Needs A+)`}</b></div>
-          <div>Risk Sizing (${state.riskPct}%): <b style="color:#38bdf8; font-size:12px;">${pos.lotFormatted} lot</b> · Risk: <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></div>
+          <div>Adaptive Risk (<b>${adaptive.mode}</b>): <b style="color:#38bdf8; font-size:12px;">${pos.lotFormatted} lot</b> · Risk: <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></div>
+          ${spikeHazardHtml}
           <div style="color:#d1d4dc; margin-top:2px;">🛡 ${riskCheck.reason}</div>
           <div style="display:flex; justify-content:space-between; margin-top:3px; padding-top:3px; border-top:1px solid var(--border);">
-            <span>At TP1 (50% EQ + BE): <b style="color:#fbbf24;">+$${pos.tp1ProfitUsd.toFixed(2)}</b></span>
+            <span>At TP1 (50% Banked + BE): <b style="color:#fbbf24;">+$${pos.tp1ProfitUsd.toFixed(2)}</b></span>
             <span>At TP2 Target: <b style="color:#26a69a;">+$${pos.tp2TotalProfitUsd.toFixed(2)}</b></span>
           </div>
           ${openOrdersHtml}
@@ -1169,8 +1178,13 @@
       const liveEq = brokerAcc?.equity || brokerAcc?.balance || state.balance;
       const f = v => v != null && isFinite(v) ? v.toFixed(decimals || 2) : '—';
       const stInfo = E.STATE_INFO[setup.state] || { label: setup.state, tone: 'good' };
-      const pos = ML.calcPositionForAccount(market, setup.entry, setup.sl, setup.tp1, setup.tp2, liveEq, state.riskPct);
+      const adaptive = ML.computeAdaptiveRisk ? ML.computeAdaptiveRisk(state.riskPct, brokerAcc, setup, ml) : { riskPct: state.riskPct, mode: `STANDARD (${state.riskPct}%)` };
+      const pos = ML.calcPositionForAccount(market, setup.entry, setup.sl, setup.tp1, setup.tp2, liveEq, adaptive.riskPct);
       const kl = setup.keyLevels && setup.keyLevels.length ? setup.keyLevels.map(k => k.type).join(' + ') : 'OB + FVG';
+      const sh = ml?.spikeHazard;
+      const spikeBadge = sh && sh.isSpikeIndex
+        ? `<div class="small" style="margin-top:2px; color:${sh.hazardPct >= 75 ? '#fbbf24' : '#38bdf8'}; font-weight:600;">${sh.label} · ${sh.estTicksSinceSpike}/${sh.expectedInterval} ticks</div>`
+        : '';
       const lvls = {
         label: setup.cbsIdx >= 0 ? 'Ch. 8 CBS Limit' : 'Ch. 7 LTF OB Limit',
         entry: setup.entry,
@@ -1187,6 +1201,7 @@
             <div>
               <div style="font-weight:700; font-size:13px; color:#fff;">${market.name}</div>
               <div class="small muted">${isWt ? 'WELTRADE MT5 (#43374418)' : 'DERIV MT5 (#32398784)'} · ${F.TF_PAIRS[state.pairKey].label} · Spot ${f(price)}</div>
+              ${spikeBadge}
             </div>
             <div style="text-align:right;">
               <span class="st-pill st-${stInfo.tone}">${stInfo.label}</span>
@@ -1201,7 +1216,7 @@
           <div class="card" style="padding:6px 8px; background:var(--bg-0); font-family:var(--font-mono); font-size:11px;">
             <div style="display:flex; justify-content:space-between;">
               <span>${isWt ? 'Weltrade' : 'Deriv'} Lot: <b style="color:#38bdf8;">${pos.lotFormatted} lot</b></span>
-              <span>Risk (${state.riskPct}%): <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></span>
+              <span>${adaptive.mode}: <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></span>
             </div>
             <div class="small muted" style="margin-top:2px;">${pos.splitInstruction}</div>
           </div>

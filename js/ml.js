@@ -209,9 +209,11 @@
 
     const bayesRate = (m.wins + 5) / (m.samples + 7);
     const blended = 0.65 * logisticProb + 0.35 * bayesRate;
-    const probTP1 = Math.min(96, Math.max(25, Math.round(blended * 100)));
+    const spikeHazard = computeSpikeCycleHazard(series, setup);
+    const spikeBonus = (spikeHazard.isSpikeIndex && spikeHazard.hazardPct >= 75) ? 4 : 0;
+    const probTP1 = Math.min(98, Math.max(25, Math.round(blended * 100) + spikeBonus));
     const tp2Ratio = m.wins > 0 ? Math.max(0.48, m.tp2Wins / m.wins) : 0.60;
-    const probTP2 = Math.min(90, Math.max(20, Math.round(probTP1 * tp2Ratio)));
+    const probTP2 = Math.min(92, Math.max(20, Math.round(probTP1 * tp2Ratio)));
 
     const pred = {
       probTP1,
@@ -222,11 +224,109 @@
       avgBarsToTP1: Math.round(m.avgBarsToTP1),
       recommendedSLBufferATR: +(Math.max(0.12, m.avgSweepATR * 0.35)).toFixed(2),
       bestKeyLevel: bestKeyLevelFor(m),
-      topDrivers: topDriversFor(m)
+      topDrivers: topDriversFor(m),
+      spikeHazard
     };
     pred.isPure = isPureSignal(series.market, setup, pred);
     pred.isLiveSignal = isLiveAutoExecutable(series, setup, pred);
     return pred;
+  }
+
+  /**
+   * Algorithmic Spike-Cycle Hazard Predictor (Boom / Crash / PainX / GainX / BreakX / DEX)
+   * Models Poisson/Weibull arrival probability of institutional synthetic spikes inside Order Blocks.
+   */
+  function computeSpikeCycleHazard(series, setup) {
+    const market = series?.market || {};
+    const name = String(market.name || market.id || '').toUpperCase();
+    const isSpikeIndex = Boolean(
+      market.spike ||
+      name.includes('BOOM') || name.includes('CRASH') ||
+      name.includes('PAINX') || name.includes('GAINX') ||
+      name.includes('BREAKX') || name.includes('DEX')
+    );
+    if (!isSpikeIndex) {
+      return { isSpikeIndex: false, hazardPct: 0, barsSinceSpike: 0, estTicksSinceSpike: 0, expectedInterval: 0, label: 'Continuous Vol' };
+    }
+
+    let expectedInterval = 600;
+    if (name.includes('300')) expectedInterval = 300;
+    else if (name.includes('400')) expectedInterval = 400;
+    else if (name.includes('500')) expectedInterval = 500;
+    else if (name.includes('600')) expectedInterval = 600;
+    else if (name.includes('800')) expectedInterval = 800;
+    else if (name.includes('900')) expectedInterval = 900;
+    else if (name.includes('999') || name.includes('1000')) expectedInterval = 1000;
+    else if (name.includes('1200')) expectedInterval = 1200;
+    else if (name.includes('1800')) expectedInterval = 1800;
+    else if (name.includes('2000')) expectedInterval = 2000;
+
+    const ltf = series?.ltf || [];
+    const ltfSec = series?.pair?.ltf || 300;
+    if (ltf.length < 15) {
+      return { isSpikeIndex: true, hazardPct: 55, barsSinceSpike: 4, estTicksSinceSpike: 240, expectedInterval, label: '🟢 PRIME SPIKE WINDOW (55%)' };
+    }
+
+    let avgRng = 0;
+    const lookback = Math.min(ltf.length - 1, 40);
+    for (let i = ltf.length - lookback; i < ltf.length; i++) {
+      avgRng += Math.max(ltf[i].high - ltf[i].low, 1e-8);
+    }
+    avgRng /= Math.max(1, lookback);
+
+    const isUpSpike = market.spike === 'up' || name.includes('BOOM') || name.includes('GAINX') || name.includes('UP');
+    let barsSinceSpike = 0;
+    for (let i = ltf.length - 1; i >= Math.max(0, ltf.length - 50); i--) {
+      const move = isUpSpike ? (ltf[i].close - ltf[i].open) : (ltf[i].open - ltf[i].close);
+      if (avgRng > 0 && move >= avgRng * 2.1) break;
+      barsSinceSpike++;
+    }
+
+    const estTicksSinceSpike = Math.round(barsSinceSpike * Math.min(ltfSec, 180));
+    const ratio = estTicksSinceSpike / Math.max(100, expectedInterval);
+    const hazardPct = Math.min(99, Math.max(8, Math.round((1 - Math.exp(-Math.pow(ratio, 1.35))) * 100)));
+
+    let label = `⏳ DRIFT RECHARGE (${hazardPct}%)`;
+    if (hazardPct >= 75) label = `⚡ OVERDUE SPIKE SNIPER (${hazardPct}%)`;
+    else if (hazardPct >= 45) label = `🟢 PRIME SPIKE WINDOW (${hazardPct}%)`;
+
+    return {
+      isSpikeIndex: true,
+      hazardPct,
+      barsSinceSpike,
+      estTicksSinceSpike,
+      expectedInterval,
+      label
+    };
+  }
+
+  /**
+   * Adaptive Streak-Protected Risk Engine (0.50% Defensive -> 0.75% Cautious -> 1.00% Standard -> 1.35% Ultra A+)
+   */
+  function computeAdaptiveRisk(baseRiskPct = 1.0, accountState = null, setup = null, mlPred = null) {
+    const streak = Number(accountState?.currentStreak || 0);
+    const ddPct = Number(accountState?.dailyDdPct || 0);
+    const rr2 = Number(setup?.rr2 || 2.5);
+    const spikeHaz = Number(mlPred?.spikeHazard?.hazardPct || 0);
+
+    if (streak <= -2 || ddPct >= 2.0) {
+      return { riskPct: 0.50, mode: 'DEFENSIVE (0.50%)', reason: `Drawdown Defense active (Streak ${streak}, DD ${ddPct.toFixed(2)}%)` };
+    }
+    if (streak === -1) {
+      return { riskPct: 0.75, mode: 'CAUTIOUS (0.75%)', reason: 'Post-loss step-down protection (-1 streak)' };
+    }
+    if (streak >= 1 && (rr2 >= 3.2 || spikeHaz >= 75)) {
+      return {
+        riskPct: 1.35,
+        mode: spikeHaz >= 75 ? 'ULTRA SPIKE SNIPER (1.35%)' : 'ULTRA A+ STREAK (1.35%)',
+        reason: `Winning streak (+${streak}) + High Confluence (${spikeHaz >= 75 ? `Spike Hazard ${spikeHaz}%` : `RR 1:${rr2.toFixed(1)}`})`
+      };
+    }
+    return {
+      riskPct: Math.min(Math.max(+baseRiskPct || 1.0, 0.5), 2.0),
+      mode: spikeHaz >= 75 ? `SPIKE SNIPER (${(+baseRiskPct || 1.0).toFixed(2)}%)` : `STANDARD A+ (${(+baseRiskPct || 1.0).toFixed(2)}%)`,
+      reason: `Baseline institutional risk (${streak >= 0 ? `+${streak} streak` : `${streak} streak`})`
+    };
   }
 
   function bestKeyLevelFor(m) {
@@ -491,6 +591,8 @@
     getModel,
     trainOnSetups,
     predict,
+    computeSpikeCycleHazard,
+    computeAdaptiveRisk,
     isPureSignal,
     isLiveAutoExecutable,
     evaluatePortfolioRisk,

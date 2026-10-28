@@ -373,16 +373,145 @@ bool CanOpenNewTrade(const string sym, const string comment, string &outReason)
 }
 
 //+------------------------------------------------------------------+
+//| Algorithmic Spike-Cycle Hazard Predictor (Boom/Crash/PainX/GainX)|
+//+------------------------------------------------------------------+
+double GetSpikeCycleHazard(const string sym, bool isBuy, int &outBarsSinceSpike, long &outTicksSinceSpike, int &outExpectedInterval)
+{
+   outBarsSinceSpike   = 0;
+   outTicksSinceSpike  = 0;
+   outExpectedInterval = 0;
+
+   string up = sym;
+   StringToUpper(up);
+   bool isSpikeIdx = (StringFind(up, "BOOM") >= 0 || StringFind(up, "CRASH") >= 0 ||
+                      StringFind(up, "PAINX") >= 0 || StringFind(up, "GAINX") >= 0 ||
+                      StringFind(up, "BREAKX") >= 0 || StringFind(up, "DEX") >= 0);
+   if(!isSpikeIdx) return 0.0;
+
+   if(StringFind(up, "300") >= 0)       outExpectedInterval = 300;
+   else if(StringFind(up, "400") >= 0)  outExpectedInterval = 400;
+   else if(StringFind(up, "500") >= 0)  outExpectedInterval = 500;
+   else if(StringFind(up, "600") >= 0)  outExpectedInterval = 600;
+   else if(StringFind(up, "800") >= 0)  outExpectedInterval = 800;
+   else if(StringFind(up, "900") >= 0)  outExpectedInterval = 900;
+   else if(StringFind(up, "999") >= 0 || StringFind(up, "1000") >= 0) outExpectedInterval = 1000;
+   else if(StringFind(up, "1200") >= 0) outExpectedInterval = 1200;
+   else if(StringFind(up, "1800") >= 0) outExpectedInterval = 1800;
+   else if(StringFind(up, "2000") >= 0) outExpectedInterval = 2000;
+   else outExpectedInterval = 600;
+
+   if(Bars(sym, PERIOD_M1) < 30) return 50.0;
+
+   MqlRates m1[];
+   ArraySetAsSeries(m1, true);
+   int copied = CopyRates(sym, PERIOD_M1, 0, 60, m1);
+   if(copied < 20) return 50.0;
+
+   double avgRng = 0.0;
+   for(int i = 1; i < copied; i++)
+      avgRng += MathMax(m1[i].high - m1[i].low, 1e-8);
+   avgRng /= (double)(copied - 1);
+
+   bool isUpSpikeIdx = (StringFind(up, "BOOM") >= 0 || StringFind(up, "GAINX") >= 0 || StringFind(up, "UP") >= 0);
+   for(int i = 0; i < copied; i++)
+   {
+      double move = isUpSpikeIdx ? (m1[i].close - m1[i].open) : (m1[i].open - m1[i].close);
+      if(avgRng > 0.0 && move >= avgRng * 2.2)
+         break;
+      outBarsSinceSpike++;
+      outTicksSinceSpike += (m1[i].tick_volume > 0 ? m1[i].tick_volume : 60);
+   }
+
+   double ratio = (double)outTicksSinceSpike / (double)MathMax(outExpectedInterval, 100);
+   double hazard = (1.0 - MathExp(-MathPow(ratio, 1.35))) * 100.0;
+   return MathMin(99.0, MathMax(5.0, hazard));
+}
+
+//+------------------------------------------------------------------+
+//| Adaptive Streak-Protected Risk Engine (0.50% -> 1.00% -> 1.35%)  |
+//+------------------------------------------------------------------+
+void GetAccountStreakAndAdaptiveRisk(const string sym, bool isBuy, double rr, double &outRiskPct, string &outModeTag, int &outStreak)
+{
+   outStreak  = 0;
+   outRiskPct = InpRiskPercent;
+   outModeTag = "STANDARD_1.0%";
+
+   if(HistorySelect(TimeCurrent() - 7 * 86400, TimeCurrent()))
+   {
+      int totalDeals = HistoryDealsTotal();
+      int firstSign  = 0;
+      for(int d = totalDeals - 1; d >= 0; d--)
+      {
+         ulong dt = HistoryDealGetTicket(d);
+         if(dt == 0) continue;
+         long entryType = HistoryDealGetInteger(dt, DEAL_ENTRY);
+         if(entryType != DEAL_ENTRY_OUT && entryType != DEAL_ENTRY_INOUT) continue;
+         string dSym = HistoryDealGetString(dt, DEAL_SYMBOL);
+         if(StringLen(dSym) == 0) continue;
+
+         double netPnl = HistoryDealGetDouble(dt, DEAL_PROFIT) + HistoryDealGetDouble(dt, DEAL_SWAP) + HistoryDealGetDouble(dt, DEAL_COMMISSION);
+         if(MathAbs(netPnl) < 0.01) continue; // ignore scratch breakevens
+
+         int sign = (netPnl > 0.0) ? 1 : -1;
+         if(firstSign == 0)
+         {
+            firstSign = sign;
+            outStreak = sign;
+         }
+         else if(sign == firstSign)
+         {
+            outStreak += sign;
+         }
+         else
+         {
+            break;
+         }
+      }
+   }
+
+   double eq     = AccountInfoDouble(ACCOUNT_EQUITY);
+   double bal    = AccountInfoDouble(ACCOUNT_BALANCE);
+   double refCap = MathMax(g_dayStartEquity, bal);
+   double ddPct  = (refCap > 0.0 && eq < refCap) ? (((refCap - eq) / refCap) * 100.0) : 0.0;
+
+   int barsSince = 0; long ticksSince = 0; int expInt = 0;
+   double spikeHaz = GetSpikeCycleHazard(sym, isBuy, barsSince, ticksSince, expInt);
+
+   if(outStreak <= -2 || ddPct >= 2.0)
+   {
+      outRiskPct = 0.50;
+      outModeTag = "DEFENSIVE_0.50%";
+   }
+   else if(outStreak == -1)
+   {
+      outRiskPct = 0.75;
+      outModeTag = "CAUTIOUS_0.75%";
+   }
+   else if(outStreak >= 1 && (rr >= 3.20 || spikeHaz >= 75.0))
+   {
+      outRiskPct = MathMin(1.35, InpMaxRiskPercent);
+      outModeTag = (spikeHaz >= 75.0) ? "ULTRA_SPIKE_SNIPER_1.35%" : "ULTRA_APLUS_1.35%";
+   }
+   else
+   {
+      outRiskPct = InpRiskPercent;
+      outModeTag = (spikeHaz >= 75.0) ? "SPIKE_SNIPER_1.00%" : "STANDARD_1.00%";
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Exact Risk-Managed Lot Size Calculation Using OrderCalcProfit    |
 //+------------------------------------------------------------------+
-double CalculateRiskLot(const string sym, bool isBuy, double entryPrice, double slPrice, double &outRiskUsd)
+double CalculateRiskLot(const string sym, bool isBuy, double entryPrice, double slPrice, double rr, double &outRiskUsd, double &outAdaptivePct, string &outRiskMode)
 {
    outRiskUsd = 0.0;
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    if(equity <= 0.0) equity = AccountInfoDouble(ACCOUNT_BALANCE);
    if(equity <= 0.0) return 0.0;
 
-   double riskPct = MathMin(MathMax(InpRiskPercent, 0.10), InpMaxRiskPercent);
+   int streak = 0;
+   GetAccountStreakAndAdaptiveRisk(sym, isBuy, rr, outAdaptivePct, outRiskMode, streak);
+   double riskPct = MathMin(MathMax(outAdaptivePct, 0.10), InpMaxRiskPercent);
    double targetRiskUsd = equity * (riskPct / 100.0);
 
    double volMin  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
@@ -483,7 +612,9 @@ bool ExecuteVerifiedAPlusTrade(const string cmdId, const string sym, bool isBuy,
    }
 
    double actualRiskUsd = 0.0;
-   double lots = CalculateRiskLot(sym, isBuy, entry, sl, actualRiskUsd);
+   double adaptivePct   = InpRiskPercent;
+   string riskModeTag   = "STANDARD_1.0%";
+   double lots = CalculateRiskLot(sym, isBuy, entry, sl, rr, actualRiskUsd, adaptivePct, riskModeTag);
    if(lots <= 0.0) return false;
 
    ConfigureSymbolFilling(sym);
@@ -977,9 +1108,14 @@ void ExportAccountAndOrders()
    double refCap     = MathMax(g_dayStartEquity, bal);
    double dailyDdPct = (refCap > 0.0 && eq < refCap) ? (((refCap - eq) / refCap) * 100.0) : 0.0;
 
+   double curAdaptivePct = InpRiskPercent;
+   string curAdaptiveMode = "STANDARD_1.00%";
+   int    curStreak = 0;
+   GetAccountStreakAndAdaptiveRisk(_Symbol, true, 2.6, curAdaptivePct, curAdaptiveMode, curStreak);
+
    string stateJson = StringFormat(
-      "{\"broker\":\"%s\",\"login\":%I64d,\"server\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"freeMargin\":%.2f,\"floatingPnl\":%.2f,\"realizedPnl\":%.2f,\"closedCount\":%d,\"winCount\":%d,\"lossCount\":%d,\"winRatePct\":%.1f,\"dailyDdPct\":%.2f,\"partialTpCount\":%d,\"updated\":%I64d,\"orders\":%s,\"history\":%s}",
-      broker, login, srv, bal, eq, margin, floatingPnl, realizedPnl, closedCount, winCount, lossCount, winRatePct, dailyDdPct, g_partialClosedCount, (long)TimeCurrent(), posJson, histJson
+      "{\"broker\":\"%s\",\"login\":%I64d,\"server\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"freeMargin\":%.2f,\"floatingPnl\":%.2f,\"realizedPnl\":%.2f,\"closedCount\":%d,\"winCount\":%d,\"lossCount\":%d,\"winRatePct\":%.1f,\"dailyDdPct\":%.2f,\"partialTpCount\":%d,\"adaptiveRiskPct\":%.2f,\"adaptiveMode\":\"%s\",\"currentStreak\":%d,\"updated\":%I64d,\"orders\":%s,\"history\":%s}",
+      broker, login, srv, bal, eq, margin, floatingPnl, realizedPnl, closedCount, winCount, lossCount, winRatePct, dailyDdPct, g_partialClosedCount, curAdaptivePct, curAdaptiveMode, curStreak, (long)TimeCurrent(), posJson, histJson
    );
 
    string brokerFile = IsWeltradeBroker() ? "smc_bridge\\account_weltrade.json" : "smc_bridge\\account_deriv.json";
