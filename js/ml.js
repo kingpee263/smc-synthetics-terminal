@@ -225,7 +225,7 @@
       topDrivers: topDriversFor(m)
     };
     pred.isPure = isPureSignal(series.market, setup, pred);
-    pred.isLiveSignal = pred.isPure && (setup.state === 'IN_TRADE' || setup.state === 'TP1_RUNNER' || setup.state === 'WAIT_TRIGGER');
+    pred.isLiveSignal = isLiveAutoExecutable(series, setup, pred);
     return pred;
   }
 
@@ -248,24 +248,100 @@
   }
 
   /**
-   * STRICT 6-GATE SMC EX-ANTE FILTER (Frank Miller Chapters 1–9)
+   * STRICT 8-GATE PURE A+ SMC FILTER (Frank Miller Chapters 1–9)
+   * Blocks all regular / mediocre trades (Grade A, B, C, missing FVG, missing IDM sweep, counter-spike, or <75% prob).
    */
   function isPureSignal(market, setup, mlPred) {
     if (!setup || setup.entry == null || setup.sl == null || setup.tp1 == null) return false;
     // Gate 1: Valid active or completed state
     const validStates = new Set(['IN_TRADE', 'TP1_RUNNER', 'WAIT_TRIGGER', 'TP2', 'BREAKEVEN', 'STOPPED']);
     if (!validStates.has(setup.state)) return false;
-    // Gate 2: Mandatory HTF Order Block / Imbalance / Liquidity Pool
-    if (!setup.keyLevels || setup.keyLevels.length === 0) return false;
-    // Gate 3: Minimum Reward-to-Risk ratio >= 1.20R on TP1 and >= 2.0R on TP2
-    if (!setup.rr1 || setup.rr1 < 1.20 || !setup.rr2 || setup.rr2 < 2.0) return false;
-    // Gate 4: Grade A or A+ only
-    if (setup.grade !== 'A+' && setup.grade !== 'A') return false;
-    // Gate 5: Boom / Crash / PainX / GainX spike direction harmony
-    if (setup.againstSpike && (setup.insideLTF || 0) < 2) return false;
-    // Gate 6: Quant model TP1 probability >= 67%
-    if ((mlPred?.probTP1 || 0) < 67) return false;
+    // Gate 2: STRICTLY Grade A+ ONLY (100% 7/7 checklist pass, zero warnings, zero fails — no Grade A/B/C regular trades)
+    if (setup.grade !== 'A+') return false;
+    // Gate 3: HTF BOS/CHoCH must have swept a valid pullback and closed with a candlestick body (Ch. 1 & 2)
+    if (!setup.brokeStructure || !setup.sweptPriorPullback) return false;
+    // Gate 4: Strict Premium (>50% Fib for SELL) / Discount (<50% Fib for BUY) alignment (Ch. 3)
+    if (setup.isBear && setup.entry < setup.mid) return false;
+    if (!setup.isBear && setup.entry > setup.mid) return false;
+    // Gate 5: Mandatory Valid Order Block with BOTH Liquidity Sweep AND Imbalance/FVG (Ch. 4)
+    if (!setup.htfOB || !setup.htfOB.sweptPrev || !setup.htfOB.hasImbalance) return false;
+    // Gate 6: Inducement (IDM) trap MUST be swept before tapping the extreme POI (Ch. 5)
+    if (!setup.sweptIdm || (setup.insideLTF || 0) < 1) return false;
+    // Gate 7: LTF Advanced CHoCH (body close) + LTF OB or CBS Engulfing + Institutional R:R (>= 1.50R TP1, >= 2.50R TP2)
+    if (setup.model1Idx == null || setup.model1Idx < 0) return false;
+    if (!setup.rr1 || setup.rr1 < 1.50 || !setup.rr2 || setup.rr2 < 2.50) return false;
+    // Gate 8: Never trade against Boom/Crash/PainX/GainX spike direction + Quant probability >= 75%
+    if (setup.againstSpike) return false;
+    if ((mlPred?.probTP1 || 0) < 75) return false;
     return true;
+  }
+
+  /**
+   * Fresh Live Entry Verification for Auto-Execution on MT5:
+   * Ensures we only auto-execute fresh A+ triggers at the Order Block, never stale historical setups.
+   */
+  function isLiveAutoExecutable(series, setup, mlPred) {
+    if (!isPureSignal(series?.market, setup, mlPred)) return false;
+    if (setup.state !== 'WAIT_TRIGGER' && setup.state !== 'IN_TRADE') return false;
+    // If already IN_TRADE, must have triggered within the last 3 LTF bars
+    if (setup.state === 'IN_TRADE' && (setup.barsSinceEntry == null || setup.barsSinceEntry > 3)) return false;
+    const ltf = series?.ltf || [];
+    if (!ltf.length) return false;
+    const lastPrice = ltf[ltf.length - 1].close;
+    const risk = Math.max(Math.abs(setup.entry - setup.sl), 1e-6);
+    // Current price must not have already run past 50% of the way to TP1 or breached SL
+    if (setup.isBear) {
+      if (lastPrice >= setup.sl || lastPrice <= setup.tp1) return false;
+      if (Math.abs(lastPrice - setup.entry) > risk * 0.65) return false;
+    } else {
+      if (lastPrice <= setup.sl || lastPrice >= setup.tp1) return false;
+      if (Math.abs(lastPrice - setup.entry) > risk * 0.65) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Institutional Portfolio & Account Risk Guard:
+   * Blocks duplicate symbol exposure, caps max concurrent trades, and enforces daily drawdown limits.
+   */
+  function evaluatePortfolioRisk(market, pos, accountState, riskConfig = {}) {
+    const maxOpenTrades = riskConfig.maxOpenTrades || 3;
+    const maxRiskPerTradePct = riskConfig.maxRiskPerTradePct || 2.5;
+    const maxDailyDrawdownPct = riskConfig.maxDailyDrawdownPct || 4.0;
+
+    const orders = Array.isArray(accountState?.orders) ? accountState.orders : [];
+    const mt5Sym = (market?.mt5Symbol || market?.name || '').toLowerCase();
+    const mktId = (market?.id || '').toLowerCase();
+
+    const symbolAlreadyOpen = orders.some(o => {
+      const s = (o.symbol || '').toLowerCase();
+      return s === mt5Sym || s === mktId || (mt5Sym && s.includes(mt5Sym));
+    });
+    if (symbolAlreadyOpen) {
+      return { allowed: false, reason: `Position/Order already active on ${market.name} (1 trade per symbol cap)` };
+    }
+
+    if (orders.length >= maxOpenTrades) {
+      return { allowed: false, reason: `Max concurrent trades reached (${orders.length}/${maxOpenTrades} active on MT5)` };
+    }
+
+    if (pos.overLeveraged || pos.actualRiskPct > maxRiskPerTradePct) {
+      return { allowed: false, reason: `Risk ${pos.actualRiskPct}% exceeds hard cap (${maxRiskPerTradePct}%)` };
+    }
+
+    const bal = accountState?.balance || 0;
+    const eq = accountState?.equity || bal;
+    if (bal > 0 && eq > 0) {
+      const floatingDdPct = ((bal - eq) / bal) * 100;
+      if (floatingDdPct >= maxDailyDrawdownPct) {
+        return { allowed: false, reason: `Daily Drawdown Circuit Breaker active (${floatingDdPct.toFixed(2)}% >= ${maxDailyDrawdownPct}%)` };
+      }
+    }
+
+    return {
+      allowed: true,
+      reason: `Risk Guard Approved · ${pos.lotFormatted} lot (-$${pos.actualRiskUsd.toFixed(2)} / ${pos.actualRiskPct}%) · ${orders.length}/${maxOpenTrades} slots used`
+    };
   }
 
   /* ---------------- Broker Contract Specifications & Risk Engine ---------------- */
@@ -315,7 +391,7 @@
     return { minLot: 0.01, lotStep: 0.01, maxLot: 100, usdPerPointPerLot: 1.0, lotDecimals: 2 };
   }
 
-  function calcPositionForAccount(market, entry, sl, tp1, tp2, balance = 40, riskPct = 2.5) {
+  function calcPositionForAccount(market, entry, sl, tp1, tp2, balance = 1000, riskPct = 1.0) {
     const spec = getContractSpec(market);
     const slDist = Math.max(Math.abs(entry - sl), 1e-6);
     const tp1Dist = Math.abs(tp1 - entry);
@@ -323,16 +399,18 @@
     const rr1 = tp1Dist / slDist;
     const rr2 = tp2Dist / slDist;
 
-    const targetRiskUsd = balance * (riskPct / 100);
+    const safeRiskPct = Math.min(Math.max(riskPct, 0.25), 2.5);
+    const targetRiskUsd = balance * (safeRiskPct / 100);
     const riskPerOneLot = slDist * spec.usdPerPointPerLot;
     const rawLots = riskPerOneLot > 0 ? targetRiskUsd / riskPerOneLot : spec.minLot;
 
-    const steps = Math.max(1, Math.round(rawLots / spec.lotStep));
-    const lot = +(Math.max(spec.minLot, steps * spec.lotStep)).toFixed(spec.lotDecimals);
+    const steps = Math.max(1, Math.floor(rawLots / spec.lotStep));
+    const unclampedLot = Math.max(spec.minLot, steps * spec.lotStep);
+    const lot = +(Math.min(spec.maxLot, unclampedLot)).toFixed(spec.lotDecimals);
     const minLotRiskUsd = spec.minLot * riskPerOneLot;
 
     const actualRiskUsd = +(lot * riskPerOneLot).toFixed(2);
-    const actualRiskPct = +((actualRiskUsd / Math.max(balance, 1)) * 100).toFixed(1);
+    const actualRiskPct = +((actualRiskUsd / Math.max(balance, 1)) * 100).toFixed(2);
 
     const canSplitTwoOrders = lot >= spec.minLot * 2;
     const halfLot1 = canSplitTwoOrders
@@ -345,7 +423,7 @@
     const tp1ProfitUsd = +(0.5 * actualRiskUsd * rr1).toFixed(2);
     const tp2TotalProfitUsd = +(tp1ProfitUsd + 0.5 * actualRiskUsd * rr2).toFixed(2);
 
-    const overLeveraged = actualRiskPct > Math.max(riskPct * 2.0, 5.5);
+    const overLeveraged = actualRiskPct > Math.max(safeRiskPct * 1.6, 2.5);
 
     return {
       lot,
@@ -355,7 +433,7 @@
       canSplitTwoOrders,
       splitInstruction: canSplitTwoOrders
         ? `Auto-Split: ${halfLot1.toFixed(spec.lotDecimals)} lot (TP1) + ${halfLot2.toFixed(spec.lotDecimals)} lot (TP2 + Trail X1–X3)`
-        : `Order ${lot.toFixed(spec.lotDecimals)} lot → Bank 50% at TP1 & Auto-Trail SL at X1/X2/X3`,
+        : `Order ${lot.toFixed(spec.lotDecimals)} lot → Auto-BE at TP1 & Auto-Trail SL at X1/X2/X3`,
       targetRiskUsd: +targetRiskUsd.toFixed(2),
       actualRiskUsd,
       actualRiskPct,
@@ -366,19 +444,19 @@
       rr2,
       overLeveraged,
       riskStatus: overLeveraged
-        ? `Min lot (${spec.minLot}) risks $${actualRiskUsd.toFixed(2)} (${actualRiskPct}%) — use tighter LTF OB or lower-tick pair`
+        ? `Blocked: Min lot (${spec.minLot}) risks $${actualRiskUsd.toFixed(2)} (${actualRiskPct}% > 2.5% cap)`
         : `Approved · Risking $${actualRiskUsd.toFixed(2)} (${actualRiskPct}% of $${balance.toFixed(2)})`
     };
   }
 
-  function computeWeeklyProjection(balance = 40, riskPct = 2.5, ledgerStats = null) {
+  function computeWeeklyProjection(balance = 1000, riskPct = 1.0, ledgerStats = null) {
     const winRate = ledgerStats?.winRate && ledgerStats.total >= 3 ? ledgerStats.winRate / 100 : 0.78;
     const avgWinR = ledgerStats?.avgWinR && ledgerStats.total >= 3 ? ledgerStats.avgWinR : 2.35;
     const avgLossR = 1.0;
     const expectancyR = (winRate * avgWinR) - ((1 - winRate) * avgLossR);
-    const tradesPerWeek = ledgerStats?.tradesPerWeek || 6;
+    const tradesPerWeek = ledgerStats?.tradesPerWeek || 5;
     const weeklyR = +(expectancyR * tradesPerWeek).toFixed(2);
-    const weeklyReturnRate = Math.max(0.05, (weeklyR * (riskPct / 100)));
+    const weeklyReturnRate = Math.max(0.03, (weeklyR * (riskPct / 100)));
     const weeklyUsdThisWeek = +(balance * weeklyReturnRate).toFixed(2);
 
     const weeks = [];
@@ -415,6 +493,8 @@
     trainOnSetups,
     predict,
     isPureSignal,
+    isLiveAutoExecutable,
+    evaluatePortfolioRisk,
     getContractSpec,
     calcPositionForAccount,
     computeWeeklyProjection

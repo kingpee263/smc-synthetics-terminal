@@ -553,6 +553,7 @@
       tbsIdx: tbs,
       pierceIdx: tbs,
       manipIdx,
+      sweptIdm,
       insideHTF: Math.max(0, manipIdx - i - 1),
       insideLTF: Math.max(ltfPullbacks, sweptIdm ? 2 : 1),
       motherIdx: Math.max(0, tbs - 2),
@@ -608,8 +609,9 @@
 
     const rr1 = risk > 0 ? Math.abs(entryP - tp1) / risk : 0;
     const rr2 = risk > 0 ? Math.abs(entryP - tp2) / risk : 0;
+    const barsSinceEntry = Math.max(0, ltf.length - 1 - entry);
 
-    Object.assign(setup, { entryIdx: entry, entry: entryP, sl, tp1, tp2, risk, rr1, rr2, againstSpike, atr: a });
+    Object.assign(setup, { entryIdx: entry, barsSinceEntry, entry: entryP, sl, tp1, tp2, risk, rr1, rr2, againstSpike, atr: a });
 
     // Discount / Premium Fib OTE Zone (50% - 79% Fib - Ch. 3 Fig 3.12)
     const leg = Math.abs(crth - crtl);
@@ -624,8 +626,8 @@
       setup.kod = { idx: entry, price: ltf[entry].close };
     }
 
-    if (rr1 < o.minRR * 0.75) {
-      return { ...setup, state: 'LOW_RR', invalidReason: `Reward-to-Risk 1:${rr1.toFixed(2)} below minimum threshold` };
+    if (rr1 < o.minRR) {
+      return { ...setup, state: 'LOW_RR', invalidReason: `Reward-to-Risk 1:${rr1.toFixed(2)} below minimum A+ threshold (1:${o.minRR.toFixed(2)})` };
     }
 
     // Simulate trade lifecycle & X1/X2/X3 trailing stops (Ch. 7 Fig 7.4)
@@ -637,66 +639,78 @@
     return setup;
   }
 
-  /* ---------------- Ch. 7 & 9: 7-Step SMC Confluence Checklist & Grading ---------------- */
+  /* ---------------- Ch. 7 & 9: Strict 7-Step Pure A+ SMC Confluence Checklist ---------------- */
   function buildChecks(s, o) {
     const checks = [];
+    const strictBosPass = Boolean(s.brokeStructure && s.sweptPriorPullback);
     checks.push({
       key: 'c1',
-      title: `1 · HTF ${s.structType || 'BOS'} (Body-Close Confirmed)`,
+      title: `1 · HTF ${s.structType || 'BOS'} (Sweep + Body-Close Confirmed)`,
       src: 'Ch. 1 & 2',
-      status: s.brokeStructure ? 'pass' : 'warn',
-      text: `${s.structType || 'BOS'} impulse leg (${(s.bodyRatio * 100).toFixed(0)}% body) · Swept pullback before break`
+      status: strictBosPass ? 'pass' : (s.brokeStructure ? 'warn' : 'fail'),
+      text: strictBosPass
+        ? `${s.structType || 'BOS'} impulse leg (${(s.bodyRatio * 100).toFixed(0)}% body) · Swept valid pullback before body-close break`
+        : 'Missing valid pre-break pullback sweep or body close'
     });
 
-    const inCorrectZone = s.isBear ? (s.entry == null || s.entry >= s.mid * 0.998) : (s.entry == null || s.entry <= s.mid * 1.002);
+    const inCorrectZone = s.isBear
+      ? (s.entry != null ? s.entry >= s.mid : true)
+      : (s.entry != null ? s.entry <= s.mid : true);
     checks.push({
       key: 'pd',
       title: `2 · ${s.isBear ? 'Premium (>50%)' : 'Discount (<50%)'} Dealing Range`,
       src: 'Ch. 3 Fib',
-      status: inCorrectZone ? 'pass' : 'warn',
-      text: `Equilibrium 50% at ${s.mid.toFixed(2)} · Trading inside ${s.isBear ? 'Premium Sell' : 'Discount Buy'} zone`
+      status: inCorrectZone ? 'pass' : 'fail',
+      text: inCorrectZone
+        ? `Equilibrium 50% at ${s.mid.toFixed(2)} · Strictly inside ${s.isBear ? 'Premium Sell (>50%)' : 'Discount Buy (<50%)'} zone`
+        : `Violates Premium/Discount rule — never ${s.isBear ? 'sell in Discount' : 'buy in Premium'}`
     });
 
     if (s.keyLevels) {
-      const hasValidOB = s.htfOB && (s.htfOB.sweptPrev || s.htfOB.hasImbalance);
+      const hasValidOB = Boolean(s.htfOB && s.htfOB.sweptPrev && s.htfOB.hasImbalance);
+      const hasPartialOB = Boolean(s.htfOB && (s.htfOB.sweptPrev || s.htfOB.hasImbalance));
       checks.push({
         key: 'kl',
-        title: '3 · Valid Order Block (Sweep + Imbalance)',
+        title: '3 · Valid Order Block (Liquidity Sweep + Imbalance/FVG)',
         src: 'Ch. 4 OB',
-        status: hasValidOB ? 'pass' : 'warn',
+        status: hasValidOB ? 'pass' : (hasPartialOB ? 'warn' : 'fail'),
         text: hasValidOB
-          ? `${s.keyLevels.map(k => k.type).join(' + ')} · Unmitigated extreme OB with 60% ATR rule`
-          : 'Standard POI zone engaged'
+          ? `${s.keyLevels.map(k => k.type).join(' + ')} · Unmitigated extreme OB with Sweep + FVG + 60% ATR rule`
+          : 'Incomplete OB (requires BOTH prior candle sweep AND unmitigated FVG)'
       });
     }
 
+    const idmSweptStrict = Boolean(s.sweptIdm && (s.insideLTF || 0) >= 1);
     checks.push({
       key: 'tbs',
-      title: '4 · Inducement (IDM) & Liquidity Sweep',
+      title: '4 · Inducement (IDM) Trap Swept First',
       src: 'Ch. 3 & 5',
-      status: s.insideLTF >= 1 ? 'pass' : 'warn',
-      text: s.liqModel ? `${s.liqModel.name} swept prior to POI mitigation` : 'Awaiting Inducement sweep'
+      status: idmSweptStrict ? 'pass' : ((s.insideLTF || 0) >= 1 ? 'warn' : 'fail'),
+      text: idmSweptStrict
+        ? `${s.liqModel ? s.liqModel.name : 'Inducement'} swept prior to extreme POI mitigation`
+        : 'First OB / Inducement not cleanly swept — high trap risk (Ch. 5)'
     });
 
     if (s.tbsIdx != null) {
-      const hasAdvChoch = s.model1Idx != null && s.model1Idx >= 0;
+      const hasAdvChoch = s.model1Idx != null && s.model1Idx >= 0 && (s.ltfObZone != null || s.cbsIdx >= 0);
       checks.push({
         key: 'choch',
-        title: '5 · LTF Advanced CHoCH / CBS Confirmation',
+        title: '5 · LTF Advanced CHoCH (Body Close) + LTF OB / CBS',
         src: 'Ch. 6 & 8',
-        status: hasAdvChoch ? 'pass' : 'warn',
+        status: hasAdvChoch ? 'pass' : 'fail',
         text: hasAdvChoch
           ? (s.cbsIdx >= 0 ? 'Adv CHoCH + Candle Breakout (CBS Engulfing) confirmed' : 'LTF Advanced CHoCH body-close + LTF OB confirmed')
-          : 'Monitoring LTF inside POI for Advanced CHoCH close'
+          : 'Awaiting LTF Advanced CHoCH body-close inside POI'
       });
     }
 
     if (s.rr1 != null) {
+      const strongRR = s.rr1 >= 1.50 && s.rr2 >= 2.50;
       checks.push({
         key: 'rr',
-        title: '6 · Reward-to-Risk & X1/X2/X3 Trail Plan',
+        title: '6 · Institutional R:R (>=1.5R TP1 / >=2.5R TP2) & Trail X1–X3',
         src: 'Ch. 7 Exit',
-        status: s.rr1 >= 1.2 ? 'pass' : 'fail',
+        status: strongRR ? 'pass' : (s.rr1 >= 1.2 ? 'warn' : 'fail'),
         text: `TP1 ${s.rr1.toFixed(2)}R · TP2 ${s.rr2.toFixed(2)}R · ${s.trailPoints?.length || 0} Trail Swings (X1–X3)`
       });
     }
@@ -704,10 +718,10 @@
     if (s.againstSpike) {
       checks.push({
         key: 'spike',
-        title: '7 · Boom/Crash/PainX Spike Filter',
+        title: '7 · Boom/Crash/PainX Spike Harmony Filter',
         src: 'Synthetics Guard',
-        status: 'warn',
-        text: 'Counter-spike direction — extra ATR stop buffer applied'
+        status: 'fail',
+        text: 'Counter-spike direction — blocked from Pure A+ auto-execution'
       });
     }
 
@@ -716,9 +730,10 @@
     const warns = applicable.filter(c => c.status === 'warn').length;
     const passes = applicable.filter(c => c.status === 'pass').length;
     let grade = 'C';
-    if (fails === 0 && warns <= 1) grade = 'A+';
-    else if (fails === 0) grade = 'A';
-    else if (fails === 1) grade = 'B';
+    // PURE A+ requires 100% pass across EVERY single confluence check (0 fails, 0 warnings)
+    if (fails === 0 && warns === 0 && passes === applicable.length) grade = 'A+';
+    else if (fails === 0 && warns <= 1) grade = 'A';
+    else if (fails <= 1) grade = 'B';
     return { checks, grade, passes, total: applicable.length };
   }
 

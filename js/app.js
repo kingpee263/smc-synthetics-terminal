@@ -30,9 +30,12 @@
     alertsOn: true,
     tgToken: '',
     tgChat: '',
-    startBalance: 40.00,
-    balance: 40.00,
-    riskPct: 2.5,
+    startBalance: 9334.00,
+    balance: 9334.00,
+    riskPct: 1.0,
+    maxOpenTrades: 3,
+    maxRiskPerTradePct: 2.5,
+    maxDailyDrawdownPct: 4.0,
     engineOpts: { ...E.DEFAULTS, minRR: 1.50 },
     series: null,
     evalRes: null,
@@ -130,13 +133,35 @@
   /* ---------------- Full MT5 Auto-Trading & X1/X2/X3 Trailing Dispatcher ---------------- */
   async function dispatchMt5Order(market, setup, activeLvls, pos, mode = 'AUTO') {
     if (!market || !setup || !activeLvls) return false;
+
+    // Strict Pure A+ Gate: Never execute regular (Grade A/B/C) setups
+    if (setup.grade !== 'A+') {
+      if (mode === 'MANUAL') {
+        toast(`<b>⛔ BLOCKED REGULAR TRADE (${setup.grade || 'C'}):</b> Only Pure <b>A+</b> (7/7 confluence) SMC setups are permitted on MT5.`);
+      }
+      return false;
+    }
+
+    // Institutional Portfolio & Account Risk Guard
+    const riskCheck = ML.evaluatePortfolioRisk(market, pos, F.mt5.accountState, {
+      maxOpenTrades: state.maxOpenTrades,
+      maxRiskPerTradePct: state.maxRiskPerTradePct,
+      maxDailyDrawdownPct: state.maxDailyDrawdownPct
+    });
+    if (!riskCheck.allowed) {
+      if (mode === 'MANUAL') {
+        toast(`<b>🛡 MT5 RISK GUARD BLOCKED:</b> ${riskCheck.reason}`);
+      }
+      return false;
+    }
+
     const cmdId = `SMC-${market.id.replace(/[^a-zA-Z0-9]/g, '')}-${setup.c1.time}`;
-    if (mode === 'AUTO' && state.dispatchedCmdIds.has(cmdId)) return false;
+    if (state.dispatchedCmdIds.has(cmdId)) return false;
     state.dispatchedCmdIds.add(cmdId);
 
     const mt5Sym = market.mt5Symbol || market.name;
     const side = setup.isBear ? 'SELL_LIMIT' : 'BUY_LIMIT';
-    const comment = `SMC_${setup.structType || 'BOS'}_${setup.grade || 'A+'}`;
+    const comment = `SMC_APLUS_${setup.structType || 'BOS'}`;
 
     const ok = await F.mt5.sendCommand({
       id: cmdId,
@@ -154,8 +179,8 @@
     const dec = F.decimalsFor(state.series?.ltf || []);
     const f = v => v != null && isFinite(v) ? v.toFixed(dec) : '—';
     toast(
-      `<b>⚡ MT5 ${mode} ORDER QUEUED: ${mt5Sym}</b>` +
-      `<div class="small muted" style="margin-top:3px;">${side} ${pos.lotFormatted} lot @ ${f(activeLvls.entry)} · SL ${f(activeLvls.sl)} · TP ${f(activeLvls.tp2)} (${comment})</div>`
+      `<b>⚡ MT5 PURE A+ ${mode} ORDER SENT: ${mt5Sym}</b>` +
+      `<div class="small muted" style="margin-top:3px;">${side} ${pos.lotFormatted} lot @ ${f(activeLvls.entry)} · SL ${f(activeLvls.sl)} (-$${pos.actualRiskUsd.toFixed(2)} / ${pos.actualRiskPct}%) · TP ${f(activeLvls.tp2)}</div>`
     );
     return ok;
   }
@@ -188,16 +213,19 @@
   }
 
   function recordPureTradeIfNew(market, series, setup, mlPred) {
+    // Always check trailing stops for existing open positions on this symbol
+    if (setup) checkAndDispatchAutoTrail(market, setup);
+
     if (!setup || !mlPred?.isPure) return;
     if (setup.entry == null || setup.sl == null || setup.tp1 == null) return;
 
-    const pos = ML.calcPositionForAccount(market, setup.entry, setup.sl, setup.tp1, setup.tp2, state.balance, state.riskPct);
+    const liveEq = F.mt5.accountState?.equity || F.mt5.accountState?.balance || state.balance;
+    const pos = ML.calcPositionForAccount(market, setup.entry, setup.sl, setup.tp1, setup.tp2, liveEq, state.riskPct);
 
-    // If Full Auto-Trading is enabled and setup is live, automatically dispatch Limit Order to MT5 Bridge
-    if (state.autoTradeEnabled && (setup.state === 'IN_TRADE' || setup.state === 'WAIT_TRIGGER' || setup.state === 'TP1_RUNNER')) {
+    // STRICT AUTO-EXECUTION: Only dispatch when mlPred.isLiveSignal === true (Pure A+, 7/7 checks, fresh trigger <= 3 bars, inside OB entry window)
+    if (state.autoTradeEnabled && mlPred.isLiveSignal) {
       const activeLvls = resolveActiveEntryLevels(setup, series) || setup;
       dispatchMt5Order(market, setup, activeLvls, pos, 'AUTO');
-      checkAndDispatchAutoTrail(market, setup);
     }
 
     const tradeId = `SMC-${market.id.replace(/[^a-zA-Z0-9]/g, '')}-${setup.id}`;
@@ -978,26 +1006,35 @@
         ${setup.kod ? `<div class="lvl"><span>Ch. 8 CBS Breakout Price</span><span>${f(setup.kod.price)}</span></div>` : ''}
       `;
 
-      const pos = ML.calcPositionForAccount(market, activeLvls.entry, activeLvls.sl, activeLvls.tp1, activeLvls.tp2, state.balance, state.riskPct);
+      const liveEq = F.mt5.accountState?.equity || F.mt5.accountState?.balance || state.balance;
+      const pos = ML.calcPositionForAccount(market, activeLvls.entry, activeLvls.sl, activeLvls.tp1, activeLvls.tp2, liveEq, state.riskPct);
       const acc = F.mt5.accountState;
+      const riskCheck = ML.evaluatePortfolioRisk(market, pos, acc, {
+        maxOpenTrades: state.maxOpenTrades,
+        maxRiskPerTradePct: state.maxRiskPerTradePct,
+        maxDailyDrawdownPct: state.maxDailyDrawdownPct
+      });
+      const isPureAPlus = setup.grade === 'A+' && mlPred.isPure;
       const openOrdersHtml = acc && Array.isArray(acc.orders) && acc.orders.length
-        ? `<div style="margin-top:4px; padding-top:4px; border-top:1px solid var(--border); color:#26a69a;"><b>Active MT5 Positions (${acc.orders.length}):</b> ` +
+        ? `<div style="margin-top:4px; padding-top:4px; border-top:1px solid var(--border); color:#26a69a;"><b>Active MT5 Positions (${acc.orders.length}/${state.maxOpenTrades}):</b> ` +
           acc.orders.map(o => `#${o.ticket} ${o.symbol} ${o.side} ${o.lot} lot (${o.profit >= 0 ? '+' : ''}$${Number(o.profit).toFixed(2)})`).join(' · ') + `</div>`
         : '';
       if (riskBadge && riskDetails && riskBox) {
-        riskBadge.textContent = state.autoTradeEnabled ? 'MT5 LIVE AUTO' : 'MANUAL MODE';
-        riskBadge.className = `st-pill ${state.autoTradeEnabled ? 'st-live' : 'st-warn'}`;
-        riskBox.style.borderLeftColor = pos.overLeveraged ? 'var(--bad)' : 'var(--good)';
+        riskBadge.textContent = !isPureAPlus
+          ? `BLOCKED (${setup.grade || 'REGULAR'})`
+          : (riskCheck.allowed ? 'PURE A+ · AUTO READY' : 'RISK CAP BLOCKED');
+        riskBadge.className = `st-pill ${isPureAPlus && riskCheck.allowed ? 'st-live' : 'st-bad'}`;
+        riskBox.style.borderLeftColor = (isPureAPlus && riskCheck.allowed) ? 'var(--good)' : 'var(--bad)';
         riskDetails.innerHTML = `
-          <div>MT5 Account: <b>#${acc?.login || '32398784'} (${acc?.server || 'Deriv-Demo'})</b> · Equity: <b>$${(acc?.equity || state.balance).toFixed(2)}</b></div>
-          <div>MT5 Auto Lot: <b style="color:#38bdf8; font-size:12px;">${pos.lotFormatted} lot</b> · Plan Risk: <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></div>
-          <div style="color:#d1d4dc; margin-top:2px;">${pos.splitInstruction}</div>
+          <div>MT5 Account: <b>#${acc?.login || '32398784'} (${acc?.server || 'Deriv-Demo'})</b> · Equity: <b>$${liveEq.toFixed(2)}</b></div>
+          <div>Auto-Gate: <b style="color:${isPureAPlus ? '#26a69a' : '#f23645'};">${isPureAPlus ? 'PURE A+ VERIFIED (7/7 Rules)' : `REGULAR SETUP BLOCKED (Grade ${setup.grade || 'C'} — Needs A+)`}</b></div>
+          <div>Risk Sizing (${state.riskPct}%): <b style="color:#38bdf8; font-size:12px;">${pos.lotFormatted} lot</b> · Risk: <b style="color:${pos.overLeveraged ? '#f23645' : '#26a69a'};">-$${pos.actualRiskUsd.toFixed(2)} (${pos.actualRiskPct}%)</b></div>
+          <div style="color:#d1d4dc; margin-top:2px;">🛡 ${riskCheck.reason}</div>
           <div style="display:flex; justify-content:space-between; margin-top:3px; padding-top:3px; border-top:1px solid var(--border);">
-            <span>At TP1 (50% EQ): <b style="color:#fbbf24;">+$${pos.tp1ProfitUsd.toFixed(2)}</b></span>
+            <span>At TP1 (50% EQ + BE): <b style="color:#fbbf24;">+$${pos.tp1ProfitUsd.toFixed(2)}</b></span>
             <span>At TP2 Target: <b style="color:#26a69a;">+$${pos.tp2TotalProfitUsd.toFixed(2)}</b></span>
           </div>
           ${openOrdersHtml}
-          ${pos.overLeveraged ? `<div style="color:#f23645; margin-top:3px;">⚠ ${pos.riskStatus}</div>` : ''}
         `;
       }
 
