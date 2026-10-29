@@ -301,9 +301,18 @@ void GetAccountGrowthTier(double equity, string &outTierName, double &outBaseRis
       outDailyLossCapPct    = 2.50;
       outDailyProfitLockPct = 4.50;
    }
+   else if(equity < 250.0)
+   {
+      outTierName           = "TIER_2_MICRO_ELEVATION ($100-$249)";
+      outBaseRiskPct        = 0.85;
+      outMaxRiskPct         = 1.65;
+      outMaxTrades          = 1;
+      outDailyLossCapPct    = 2.80;
+      outDailyProfitLockPct = 5.00;
+   }
    else if(equity < 500.0)
    {
-      outTierName           = "TIER_2_GROWTH_STARTER ($100-$499)";
+      outTierName           = "TIER_3_GROWTH_STARTER ($250-$499)";
       outBaseRiskPct        = 0.90;
       outMaxRiskPct         = 1.85;
       outMaxTrades          = 2;
@@ -312,7 +321,7 @@ void GetAccountGrowthTier(double equity, string &outTierName, double &outBaseRis
    }
    else if(equity < 2500.0)
    {
-      outTierName           = "TIER_3_INSTITUTIONAL ($500-$2,499)";
+      outTierName           = "TIER_4_INSTITUTIONAL ($500-$2,499)";
       outBaseRiskPct        = InpRiskPercent;
       outMaxRiskPct         = 2.20;
       outMaxTrades          = InpMaxOpenTrades;
@@ -321,7 +330,7 @@ void GetAccountGrowthTier(double equity, string &outTierName, double &outBaseRis
    }
    else
    {
-      outTierName           = "TIER_4_PRO_COMPOUNDER ($2,500+)";
+      outTierName           = "TIER_5_PRO_COMPOUNDER ($2,500+)";
       outBaseRiskPct        = InpRiskPercent;
       outMaxRiskPct         = InpMaxRiskPercent;
       outMaxTrades          = InpMaxOpenTrades;
@@ -338,11 +347,19 @@ bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBloc
    string up = sym;
    StringToUpper(up);
 
+   // Universal Toxic Asset Quarantine: Block erratic/toxic pairs across ALL account tiers
+   if(StringFind(up, "PAINX 1200") >= 0 || StringFind(up, "PAINX 600") >= 0 ||
+      StringFind(up, "VOLATILITY 50 INDEX") >= 0 || StringFind(up, "1HZ50V") >= 0)
+   {
+      outBlockReason = StringFormat("Tier-C Toxic Asset Guard: Blocked %s (quarantined due to erratic wicks / negative edge)", sym);
+      return false;
+   }
+
    // Tier 1 Micro Seed ($10 - $99): Block heavy tick-value / wide-swing indices that can blow micro margin
    if(equity < 100.0)
    {
       if(StringFind(up, "SFX VOL 80") >= 0 || StringFind(up, "SFX VOL 99") >= 0 ||
-         StringFind(up, "PAINX 1200") >= 0 || StringFind(up, "GAINX 1200") >= 0 ||
+         StringFind(up, "GAINX 1200") >= 0 ||
          StringFind(up, "MAX PAINX 2000") >= 0 || StringFind(up, "MAX GAINX 2000") >= 0 ||
          StringFind(up, "BREAKX 1800") >= 0 || StringFind(up, "SWITCHX 1800") >= 0 ||
          StringFind(up, "JUMP 100") >= 0 || StringFind(up, "BOOM 1000") >= 0 || StringFind(up, "CRASH 1000") >= 0)
@@ -850,13 +867,56 @@ void ManageOpenPositionsAndTrailing()
 
       double candidateSl = curSl;
 
-      if(currentR >= 1.35)
+      // ===================================================================
+      // ZERO-LOSS PROFIT ARMOR: NEVER LET A WINNER CLOSE IN A LOSS
+      // Stage 1: Jump SL to Breakeven + Buffer at +0.70R (Zero-Loss Armor)
+      // Stage 2: Ratchet SL to +0.35R profit lock at +1.20R
+      // Stage 3: Ratchet SL to +0.85R profit lock at +1.70R
+      // ===================================================================
+      if(currentR >= 0.70)
       {
-         double bePlus = isBuy ? (openP + initRisk * 0.15) : (openP - initRisk * 0.15);
-         if(isBuy && (curSl == 0.0 || bePlus > candidateSl + point))
-            candidateSl = bePlus;
-         else if(!isBuy && (curSl == 0.0 || bePlus < candidateSl - point))
-            candidateSl = bePlus;
+         double armBuffer = MathMax(point * 6.0, minDist * 0.25);
+         double beArmed = isBuy ? (openP + armBuffer) : (openP - armBuffer);
+         if(isBuy)
+         {
+            if(curSl == 0.0 || beArmed > candidateSl + point)
+               candidateSl = beArmed;
+         }
+         else
+         {
+            if(curSl == 0.0 || beArmed < candidateSl - point)
+               candidateSl = beArmed;
+         }
+      }
+
+      if(currentR >= 1.20)
+      {
+         double lock12 = isBuy ? (openP + initRisk * 0.35) : (openP - initRisk * 0.35);
+         if(isBuy)
+         {
+            if(curSl == 0.0 || lock12 > candidateSl + point)
+               candidateSl = lock12;
+         }
+         else
+         {
+            if(curSl == 0.0 || lock12 < candidateSl - point)
+               candidateSl = lock12;
+         }
+      }
+
+      if(currentR >= 1.70)
+      {
+         double lock17 = isBuy ? (openP + initRisk * 0.85) : (openP - initRisk * 0.85);
+         if(isBuy)
+         {
+            if(curSl == 0.0 || lock17 > candidateSl + point)
+               candidateSl = lock17;
+         }
+         else
+         {
+            if(curSl == 0.0 || lock17 < candidateSl - point)
+               candidateSl = lock17;
+         }
       }
 
       if(currentR >= 1.50 && Bars(sym, PERIOD_M5) > 25)
@@ -903,7 +963,10 @@ void ManageOpenPositionsAndTrailing()
       {
          ConfigureSymbolFilling(sym);
          if(g_trade.PositionModify(ticket, candidateSl, curTp))
-            Print("SMC_Auto_Bridge [X1-X3 TRAIL] Ticket #", ticket, " (", sym, ") SL trailed: ", curSl, " -> ", candidateSl);
+         {
+            string armorTag = (currentR >= 1.70) ? "PROFIT_LOCK_+0.85R" : (currentR >= 1.20 ? "PROFIT_LOCK_+0.35R" : (currentR >= 0.70 ? "ZERO_LOSS_ARMOR_BE+" : "X1-X3_TRAIL"));
+            Print("SMC_Auto_Bridge [", armorTag, "] Ticket #", ticket, " (", sym, ") SL guarded: ", curSl, " -> ", candidateSl, " (R=", DoubleToString(currentR, 2), ")");
+         }
       }
    }
 }

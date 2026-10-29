@@ -2100,8 +2100,11 @@
       const statusBadge = document.getElementById('scalpStatusBadge');
       if (statusBadge) {
         statusBadge.textContent = data.state;
-        if (data.state === 'HARVEST_LOCKED') {
-          statusBadge.style.background = '#fbbf24';
+        if (data.state === 'CEILING_LOCKED' || data.state === 'HARVEST_LOCKED') {
+          statusBadge.style.background = '#38bdf8';
+          statusBadge.style.color = '#000';
+        } else if (data.state === 'BASELINE_SECURED') {
+          statusBadge.style.background = '#22c55e';
           statusBadge.style.color = '#000';
         } else if (data.state === 'BREAKER_TRIPPED') {
           statusBadge.style.background = '#f43f5e';
@@ -2118,10 +2121,22 @@
       if (descEl) descEl.textContent = data.statusMessage;
 
       const progBar = document.getElementById('scalpProgressBar');
-      const progTxt = document.getElementById('scalpProgressText');
-      if (progBar && progTxt) {
-        progBar.style.width = `${Math.min(100, Math.max(0, data.dailyProgressPct))}%`;
-        progTxt.textContent = `$${data.currentDailyProfit.toFixed(2)} / $${data.targetDailyProfit.toFixed(2)} (${data.dailyProgressPct}%)`;
+      const baseProgTxt = document.getElementById('scalpBaselineProgressText');
+      const ceilProgTxt = document.getElementById('scalpCeilingProgressText');
+      const progTxtLegacy = document.getElementById('scalpProgressText');
+      if (progBar) {
+        const ceilingPct = data.ceilingProgressPct !== undefined ? data.ceilingProgressPct : Math.min(100, Math.max(0, (data.currentDailyProfit / (data.targetMaxCeilingProfit || 150)) * 100));
+        progBar.style.width = `${Math.min(100, Math.max(0, ceilingPct))}%`;
+      }
+      if (baseProgTxt) {
+        baseProgTxt.textContent = `Baseline: $${data.currentDailyProfit.toFixed(2)} / $${(data.targetDailyProfit || 70).toFixed(2)} (${data.dailyProgressPct}%)`;
+      }
+      if (ceilProgTxt) {
+        const ceilPct = data.ceilingProgressPct !== undefined ? data.ceilingProgressPct : 0;
+        ceilProgTxt.textContent = `Ceiling: $${data.currentDailyProfit.toFixed(2)} / $${(data.targetMaxCeilingProfit || 150).toFixed(2)} (${ceilPct}%)`;
+      }
+      if (progTxtLegacy) {
+        progTxtLegacy.textContent = `$${data.currentDailyProfit.toFixed(2)} / $${(data.targetDailyProfit || 70).toFixed(2)} (${data.dailyProgressPct}%)`;
       }
 
       const realPnlEl = document.getElementById('scalpRealizedPnl');
@@ -2710,7 +2725,20 @@
           body: JSON.stringify({ action: 'lock_profit' })
         });
         const d = await r.json();
-        toast(`<b>🎯 Harvest Locked:</b> ${d.message}`);
+        toast(`<b>🔒 Baseline Harvest Locked:</b> ${d.message}`);
+        loadAndRenderWeltradeScalper();
+      } catch (e) {}
+    });
+
+    document.getElementById('scalpLockCeilingBtn')?.addEventListener('click', async () => {
+      try {
+        const r = await fetch('/api/scalper/weltrade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'lock_profit' })
+        });
+        const d = await r.json();
+        toast(`<b>💎 $150 Ceiling Locked:</b> ${d.message}`);
         loadAndRenderWeltradeScalper();
       } catch (e) {}
     });

@@ -610,7 +610,8 @@ while ($listener.IsListening) {
 
         $scalpCfg = @{
           enabled = $true
-          targetDailyProfit = 50.00
+          targetDailyProfit = 70.00
+          targetMaxCeilingProfit = 150.00
           dailyDrawdownLimit = 15.00
           manuallyPaused = $false
           overrideState = ""
@@ -620,6 +621,7 @@ while ($listener.IsListening) {
             $saved = [System.IO.File]::ReadAllText($weltradeScalpFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
             if ($null -ne $saved.enabled) { $scalpCfg.enabled = [bool]$saved.enabled }
             if ($null -ne $saved.targetDailyProfit) { $scalpCfg.targetDailyProfit = [double]$saved.targetDailyProfit }
+            if ($null -ne $saved.targetMaxCeilingProfit) { $scalpCfg.targetMaxCeilingProfit = [double]$saved.targetMaxCeilingProfit }
             if ($null -ne $saved.dailyDrawdownLimit) { $scalpCfg.dailyDrawdownLimit = [double]$saved.dailyDrawdownLimit }
             if ($null -ne $saved.manuallyPaused) { $scalpCfg.manuallyPaused = [bool]$saved.manuallyPaused }
             if ($saved.overrideState) { $scalpCfg.overrideState = $saved.overrideState }
@@ -652,46 +654,57 @@ while ($listener.IsListening) {
         $totalDailyPnl = [Math]::Round($todayRealized + $floatingScalpPnl, 2)
         $progressPct   = [Math]::Round(([Math]::Max(0.0, $totalDailyPnl) / $scalpCfg.targetDailyProfit) * 100.0, 1)
         if ($progressPct -gt 100.0) { $progressPct = 100.0 }
+        $ceilingProgressPct = [Math]::Round(([Math]::Max(0.0, $totalDailyPnl) / $scalpCfg.targetMaxCeilingProfit) * 100.0, 1)
+        if ($ceilingProgressPct -gt 100.0) { $ceilingProgressPct = 100.0 }
 
         $lossBufferRemaining = [Math]::Round($scalpCfg.dailyDrawdownLimit - [Math]::Max(0.0, -$totalDailyPnl), 2)
         if ($lossBufferRemaining -lt 0.0) { $lossBufferRemaining = 0.0 }
 
         $state = "ACTIVE_HUNTING"
-        $statusMessage = "Hunting 1M/5M micro-scalps on Tier-A Weltrade SyntX. Target: `$$($scalpCfg.targetDailyProfit.ToString('F2'))"
+        $statusMessage = "Hunting 1M/5M micro-scalps on Tier-A Weltrade SyntX. Zero-Loss Armor active at +0.70R. Target: `$$($scalpCfg.targetDailyProfit.ToString('F2')) -> `$$($scalpCfg.targetMaxCeilingProfit.ToString('F2'))"
 
         if ($scalpCfg.manuallyPaused -or -not $scalpCfg.enabled) {
           $state = "MANUALLY_PAUSED"
           $statusMessage = "[PAUSED] Scalper manually paused by operator."
-        } elseif ($scalpCfg.overrideState -eq "HARVEST_LOCKED" -or $totalDailyPnl -ge $scalpCfg.targetDailyProfit) {
-          $state = "HARVEST_LOCKED"
-          $statusMessage = "[HARVEST_LOCKED] `$$($scalpCfg.targetDailyProfit.ToString('F2')) Daily Goal Achieved! Capital Shield locked. No further scalps needed."
+        } elseif ($scalpCfg.overrideState -eq "HARVEST_LOCKED" -or $totalDailyPnl -ge $scalpCfg.targetMaxCeilingProfit) {
+          $state = "CEILING_LOCKED"
+          $statusMessage = "[CEILING_LOCKED] `$$($scalpCfg.targetMaxCeilingProfit.ToString('F2')) Daily Ceiling Achieved! All capital locked. Trading stopped until tomorrow."
+        } elseif ($totalDailyPnl -ge $scalpCfg.targetDailyProfit) {
+          $state = "BASELINE_SECURED"
+          $statusMessage = "[BASELINE_SECURED] `$$($scalpCfg.targetDailyProfit.ToString('F2')) Daily Baseline Goal Secured! Zero-loss trailing & micro-elevation active toward `$$($scalpCfg.targetMaxCeilingProfit.ToString('F2')) ceiling."
         } elseif ($scalpCfg.overrideState -eq "BREAKER_TRIPPED" -or $totalDailyPnl -le -$scalpCfg.dailyDrawdownLimit) {
           $state = "BREAKER_TRIPPED"
           $statusMessage = "[BREAKER_TRIPPED] -$($scalpCfg.dailyDrawdownLimit.ToString('F2')) Daily Loss Cap Reached! Trading hard-locked to protect capital."
         }
 
-        $recLot = if ($wtLiveEq -lt 100) { 0.01 } elseif ($wtLiveEq -lt 500) { 0.02 } elseif ($wtLiveEq -lt 1500) { 0.03 } else { 0.05 }
+        $recLot = if ($wtLiveEq -lt 100) { 0.01 } elseif ($wtLiveEq -lt 250) { 0.01 } elseif ($wtLiveEq -lt 500) { 0.02 } elseif ($wtLiveEq -lt 1500) { 0.03 } else { 0.05 }
 
         $scalpStateOut = @{
           enabled                 = $scalpCfg.enabled
           state                   = $state
           statusMessage           = $statusMessage
           targetDailyProfit       = $scalpCfg.targetDailyProfit
+          targetMaxCeilingProfit  = $scalpCfg.targetMaxCeilingProfit
           dailyDrawdownLimit      = $scalpCfg.dailyDrawdownLimit
           currentDailyProfit      = $totalDailyPnl
           todayRealizedPnl        = [Math]::Round($todayRealized, 2)
           floatingScalpPnl        = [Math]::Round($floatingScalpPnl, 2)
           dailyProgressPct        = $progressPct
+          ceilingProgressPct      = $ceilingProgressPct
           lossBufferRemaining     = $lossBufferRemaining
           todayTradesCount        = ($todayWins + $todayLosses)
           todayWins               = $todayWins
           todayLosses             = $todayLosses
           recommendedLot          = $recLot
-          quickBeDistanceR        = 1.5
+          quickBeDistanceR        = 0.70
+          profitRatchet1R         = 1.20
+          profitRatchet2R         = 1.70
+          zeroLossArmorActive     = $true
           tp1Ratio                = 0.60
           tp1TargetR              = 2.0
           activeScalps            = $activeScalps
           prioritySymbols         = @("SFX Vol 80", "MAX GainX 1000", "FlipX 2", "SwitchX 1800", "BreakX 600", "FX Vol 20")
+          quarantinedSymbols      = @("PainX 1200", "PainX 600", "Volatility 50 Index")
           lastUpdated             = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         }
 
@@ -710,7 +723,7 @@ while ($listener.IsListening) {
         if ($body) {
           try {
             $cmd = $body | ConvertFrom-Json
-            $curCfg = @{ enabled = $true; targetDailyProfit = 50.00; dailyDrawdownLimit = 15.00; manuallyPaused = $false; overrideState = "" }
+            $curCfg = @{ enabled = $true; targetDailyProfit = 70.00; targetMaxCeilingProfit = 150.00; dailyDrawdownLimit = 15.00; manuallyPaused = $false; overrideState = "" }
             if (Test-Path $weltradeScalpFile) {
               try {
                 $curCfg = [System.IO.File]::ReadAllText($weltradeScalpFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
@@ -734,8 +747,9 @@ while ($listener.IsListening) {
             }
             elseif ($cmd.action -eq "set_params") {
               if ($cmd.targetDailyProfit) { $curCfg.targetDailyProfit = [double]$cmd.targetDailyProfit }
+              if ($cmd.targetMaxCeilingProfit) { $curCfg.targetMaxCeilingProfit = [double]$cmd.targetMaxCeilingProfit }
               if ($cmd.dailyDrawdownLimit) { $curCfg.dailyDrawdownLimit = [double]$cmd.dailyDrawdownLimit }
-              $msg = "Scalper risk parameters updated"
+              $msg = "Scalper risk parameters updated ($($curCfg.targetDailyProfit) baseline / $($curCfg.targetMaxCeilingProfit) ceiling)"
             }
             elseif ($cmd.action -eq "trigger_scalp") {
               $sym   = if ($cmd.symbol) { $cmd.symbol } else { "SFX Vol 80" }
@@ -745,7 +759,7 @@ while ($listener.IsListening) {
               $sl    = if ($cmd.sl) { [double]$cmd.sl } else { 0.0 }
               $tp    = if ($cmd.tp) { [double]$cmd.tp } else { 0.0 }
               $cmdId = "SCLP-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
-              $comm  = "SMC_SCALP_50"
+              $comm  = "SMC_SCALP_70_150"
 
               $line = "$cmdId|PLACE_LIMIT|$sym|$side|$lot|$entry|$sl|$tp|0|$comm`r`n"
               $cmdFile = Join-Path $commonSmcDir "commands_weltrade.txt"
@@ -785,6 +799,16 @@ while ($listener.IsListening) {
           $ticket = if ($cmdObj.ticket) { $cmdObj.ticket } else { 0 }
           $comm   = if ($cmdObj.comment) { $cmdObj.comment } else { "SMC_APLUS" }
           $broker = if ($cmdObj.broker) { $cmdObj.broker.ToLower() } else { "" }
+
+          # Toxic Asset Guard: Block execution on Tier-C Quarantined pairs
+          $upSym = if ($sym) { $sym.ToUpper() } else { "" }
+          if ($upSym -match "PAINX 1200|PAINX 600|VOLATILITY 50 INDEX|1HZ50V") {
+            $errBytes = [System.Text.Encoding]::UTF8.GetBytes('{"ok":false,"error":"[TOXIC ASSET GUARD] ' + $sym + ' is Tier-C Quarantined (erratic wicks / negative edge). Automated execution blocked to protect capital."}')
+            $res.ContentType = "application/json"
+            $res.OutputStream.Write($errBytes, 0, $errBytes.Length)
+            $res.OutputStream.Close()
+            continue
+          }
 
           $isWeltrade = ($broker -eq "weltrade") -or ($sym -match "Pain|Gain|Flip|Switch|BreakX|FX Vol|SFX Vol")
           $targetQueue = if ($isWeltrade) { "commands_weltrade.txt" } else { "commands_deriv.txt" }
