@@ -2081,6 +2081,241 @@
     } catch (e) {}
   }
 
+  /* ---------------- Weltrade $50 Scalper Controller ---------------- */
+  let scalperStateCache = null;
+  async function loadAndRenderWeltradeScalper() {
+    try {
+      const r = await fetch('/api/scalper/weltrade', { cache: 'no-store' });
+      if (!r.ok) return;
+      const data = await r.json();
+      scalperStateCache = data;
+
+      const badge = document.getElementById('scalpDailyBadge');
+      if (badge) {
+        const sign = data.currentDailyProfit >= 0 ? '+' : '';
+        badge.textContent = `${sign}$${data.currentDailyProfit.toFixed(2)}`;
+        badge.style.background = data.currentDailyProfit >= 0 ? '#089981' : '#f43f5e';
+      }
+
+      const statusBadge = document.getElementById('scalpStatusBadge');
+      if (statusBadge) {
+        statusBadge.textContent = data.state;
+        if (data.state === 'HARVEST_LOCKED') {
+          statusBadge.style.background = '#fbbf24';
+          statusBadge.style.color = '#000';
+        } else if (data.state === 'BREAKER_TRIPPED') {
+          statusBadge.style.background = '#f43f5e';
+          statusBadge.style.color = '#fff';
+        } else if (data.state === 'MANUALLY_PAUSED') {
+          statusBadge.style.background = '#64748b';
+          statusBadge.style.color = '#fff';
+        } else {
+          statusBadge.style.background = '#089981';
+          statusBadge.style.color = '#fff';
+        }
+      }
+      const descEl = document.getElementById('scalpStatusDesc');
+      if (descEl) descEl.textContent = data.statusMessage;
+
+      const progBar = document.getElementById('scalpProgressBar');
+      const progTxt = document.getElementById('scalpProgressText');
+      if (progBar && progTxt) {
+        progBar.style.width = `${Math.min(100, Math.max(0, data.dailyProgressPct))}%`;
+        progTxt.textContent = `$${data.currentDailyProfit.toFixed(2)} / $${data.targetDailyProfit.toFixed(2)} (${data.dailyProgressPct}%)`;
+      }
+
+      const realPnlEl = document.getElementById('scalpRealizedPnl');
+      if (realPnlEl) {
+        const s = data.todayRealizedPnl >= 0 ? '+' : '';
+        realPnlEl.textContent = `${s}$${data.todayRealizedPnl.toFixed(2)}`;
+        realPnlEl.style.color = data.todayRealizedPnl >= 0 ? '#22c55e' : '#f43f5e';
+      }
+      const trCountEl = document.getElementById('scalpTradesCount');
+      if (trCountEl) trCountEl.textContent = `${data.todayTradesCount} trades (${data.todayWins} wins / ${data.todayLosses} losses)`;
+
+      const floatPnlEl = document.getElementById('scalpFloatingPnl');
+      if (floatPnlEl) {
+        const s = data.floatingScalpPnl >= 0 ? '+' : '';
+        floatPnlEl.textContent = `${s}$${data.floatingScalpPnl.toFixed(2)}`;
+        floatPnlEl.style.color = data.floatingScalpPnl >= 0 ? '#38bdf8' : '#f43f5e';
+      }
+
+      const buffEl = document.getElementById('scalpBufferPnl');
+      if (buffEl) buffEl.textContent = `$${data.lossBufferRemaining.toFixed(2)}`;
+
+      const lotEl = document.getElementById('scalpLotSize');
+      if (lotEl) lotEl.textContent = `${data.recommendedLot} Lot`;
+
+      const tableBody = document.querySelector('#scalpOrdersTable tbody');
+      if (tableBody) {
+        tableBody.innerHTML = '';
+        const scalps = Array.isArray(data.activeScalps) ? data.activeScalps : [];
+        if (scalps.length === 0) {
+          tableBody.innerHTML = '<tr><td colspan="9" class="muted center" style="padding:14px;">No active Weltrade scalps. Scalper scanning 1M/5M structure.</td></tr>';
+        } else {
+          scalps.forEach(o => {
+            const tr = document.createElement('tr');
+            const isBuy = (o.side === 'BUY' || o.side === 'BUY_LIMIT');
+            const pnl = +o.profit || 0;
+            const pnlColor = pnl >= 0 ? '#22c55e' : '#f43f5e';
+            tr.innerHTML = `
+              <td class="mono">#${o.ticket}</td>
+              <td><b>${o.symbol}</b></td>
+              <td><span class="st-pill ${isBuy ? 'st-live' : 'st-warn'}">${o.side}</span></td>
+              <td class="mono">${o.lot}</td>
+              <td class="mono">${o.entry}</td>
+              <td class="mono">${o.current || '—'}</td>
+              <td class="mono">${o.sl || '—'} / ${o.tp || '—'}</td>
+              <td class="mono" style="font-weight:700; color:${pnlColor};">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}</td>
+              <td>
+                <div style="display:flex; gap:4px;">
+                  <button class="btn ghost small mt5-be-btn" data-ticket="${o.ticket}" data-symbol="${o.symbol}" data-entry="${o.entry}" data-tp="${o.tp || 0}" data-broker="weltrade">Lock BE</button>
+                  <button class="btn ghost small mt5-close-btn" data-ticket="${o.ticket}" data-symbol="${o.symbol}" data-broker="weltrade" style="color:#f43f5e; border-color:#f43f5e;">Close</button>
+                </div>
+              </td>
+            `;
+            tableBody.appendChild(tr);
+          });
+          wireMt5OrderActionButtons();
+        }
+      }
+
+      const togBtn = document.getElementById('scalpToggleBtn');
+      if (togBtn) {
+        togBtn.textContent = data.enabled ? '⏸ Pause Scalper' : '⚡ Resume Scalper';
+        togBtn.className = data.enabled ? 'btn ghost small' : 'btn primary small';
+      }
+    } catch (e) {}
+  }
+
+  /* ---------------- Pair Edge Matrix & Learning Controller ---------------- */
+  let pairMatrixDataCache = null;
+  async function loadAndRenderPairLearning() {
+    try {
+      const r = await fetch('/api/learning/pairs', { cache: 'no-store' });
+      if (!r.ok) return;
+      const data = await r.json();
+      pairMatrixDataCache = data;
+
+      const badge = document.getElementById('alphaPairBadge');
+      if (badge) badge.textContent = `${data.alphaCount} Alpha`;
+
+      const aEl = document.getElementById('matrixAlphaCount');
+      if (aEl) aEl.textContent = `${data.alphaCount} Pairs`;
+      const dEl = document.getElementById('matrixDevCount');
+      if (dEl) dEl.textContent = `${data.developingCount} Pairs`;
+      const qEl = document.getElementById('matrixQuarCount');
+      if (qEl) qEl.textContent = `${data.quarantinedCount} Pairs`;
+
+      if (data.pairs && data.pairs.length > 0) {
+        const sum = data.pairs.reduce((acc, p) => acc + (p.obedienceScore || 0), 0);
+        const avg = (sum / data.pairs.length).toFixed(1);
+        const avgEl = document.getElementById('matrixAvgObedience');
+        if (avgEl) avgEl.textContent = `${avg}%`;
+      }
+
+      renderPairMatrixTable();
+    } catch (e) {}
+  }
+
+  function renderPairMatrixTable() {
+    if (!pairMatrixDataCache || !pairMatrixDataCache.pairs) return;
+    const searchVal = (document.getElementById('matrixSearch')?.value || '').toLowerCase();
+    const tierFilter = document.getElementById('matrixTierFilter')?.value || 'all';
+    const tbody = document.querySelector('#matrixTable tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const filtered = pairMatrixDataCache.pairs.filter(p => {
+      const matchSearch = p.symbol.toLowerCase().includes(searchVal) || p.broker.toLowerCase().includes(searchVal);
+      const matchTier = tierFilter === 'all' || p.tier === tierFilter;
+      return matchSearch && matchTier;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="10" class="muted center" style="padding:16px;">No pairs match the selected filters.</td></tr>';
+      return;
+    }
+
+    filtered.forEach(p => {
+      const tr = document.createElement('tr');
+      const isAlpha = p.tier === 'TIER_A_ALPHA';
+      const isQuar  = p.tier === 'TIER_C_QUARANTINE';
+      const badgeClass = isAlpha ? 'st-live' : (isQuar ? 'st-warn' : 'st-pend');
+      const pnlColor = p.realizedPnl >= 0 ? '#22c55e' : '#f43f5e';
+      const brkBadge = p.broker === 'weltrade' ? '<span style="color:#38bdf8; font-weight:700;">Weltrade</span>' : (p.broker === 'deriv' ? '<span style="color:#fbbf24; font-weight:700;">Deriv</span>' : '<span style="color:#a855f7;">Forex</span>');
+
+      tr.innerHTML = `
+        <td>
+          <div style="font-weight:700; color:#fff;">${p.symbol}</div>
+          <div class="small muted">${brkBadge}</div>
+        </td>
+        <td>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <div style="background:rgba(255,255,255,0.1); width:60px; height:7px; border-radius:3px; overflow:hidden;">
+              <div style="width:${p.obedienceScore}%; height:100%; background:${isAlpha ? '#22c55e' : (isQuar ? '#f43f5e' : '#fbbf24')};"></div>
+            </div>
+            <b class="mono">${p.obedienceScore}%</b>
+          </div>
+        </td>
+        <td class="mono" style="font-weight:700; color:${p.winRatePct >= 65 ? '#22c55e' : (p.winRatePct < 50 ? '#f43f5e' : '#fbbf24')};">${p.winRatePct}%</td>
+        <td class="mono">${p.profitFactor}</td>
+        <td class="mono" style="font-weight:700; color:${pnlColor};">${p.realizedPnl >= 0 ? '+' : ''}$${p.realizedPnl.toFixed(2)}</td>
+        <td class="mono">${p.totalTrades} (${p.wins}W / ${p.losses}L)</td>
+        <td class="mono">1:${p.avgRr}</td>
+        <td><span class="st-pill ${badgeClass}">${p.tierBadge || p.tier}</span></td>
+        <td class="small" style="max-width:240px; color:var(--text-dim);">${p.recommendation}</td>
+        <td>
+          <div style="display:flex; gap:4px;">
+            ${!isAlpha ? `<button class="btn ghost small matrix-promote-btn" data-sym="${p.symbol}" title="Promote to Alpha Elite" style="color:#22c55e; border-color:#22c55e;">Promote</button>` : ''}
+            ${!isQuar ? `<button class="btn ghost small matrix-quar-btn" data-sym="${p.symbol}" title="Quarantine (Pause trading)" style="color:#f43f5e; border-color:#f43f5e;">Quarantine</button>` : ''}
+            <button class="btn ghost small matrix-reset-btn" data-sym="${p.symbol}" title="Reset to auto ML tier">Reset</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll('.matrix-promote-btn').forEach(b => {
+      b.addEventListener('click', async () => {
+        const sym = b.dataset.sym;
+        await fetch('/api/learning/pairs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: sym, action: 'promote' })
+        });
+        toast(`<b>🟢 ${sym} Promoted to Alpha Elite:</b> High priority scalping enabled.`);
+        loadAndRenderPairLearning();
+      });
+    });
+
+    tbody.querySelectorAll('.matrix-quar-btn').forEach(b => {
+      b.addEventListener('click', async () => {
+        const sym = b.dataset.sym;
+        await fetch('/api/learning/pairs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: sym, action: 'quarantine' })
+        });
+        toast(`<b>🔴 ${sym} Quarantined:</b> Auto-paused from execution to protect balance.`);
+        loadAndRenderPairLearning();
+      });
+    });
+
+    tbody.querySelectorAll('.matrix-reset-btn').forEach(b => {
+      b.addEventListener('click', async () => {
+        const sym = b.dataset.sym;
+        await fetch('/api/learning/pairs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: sym, action: 'reset' })
+        });
+        toast(`<b>🔄 ${sym} Reset:</b> Returned to autonomous ML ranking.`);
+        loadAndRenderPairLearning();
+      });
+    });
+  }
+
   /* ---------------- Real-Time MT5 State Poller ---------------- */
   async function pollLiveMt5State() {
     try {
@@ -2091,6 +2326,7 @@
         autoSyncMt5TradesToJournal(acc);
         if (state.series) applyChartAnnotations(false);
       }
+      loadAndRenderWeltradeScalper();
     } catch (e) {}
   }
 
@@ -2321,6 +2557,12 @@
         } else if (vName === 'clients') {
           document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-clients'));
           loadAndRenderClients();
+        } else if (vName === 'scalper') {
+          document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-scalper'));
+          loadAndRenderWeltradeScalper();
+        } else if (vName === 'learning') {
+          document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-learning'));
+          loadAndRenderPairLearning();
         } else {
           document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${vName}`));
         }
@@ -2446,12 +2688,73 @@
       }
     });
 
+    // Weltrade Scalper Controls
+    document.getElementById('scalpToggleBtn')?.addEventListener('click', async () => {
+      try {
+        const r = await fetch('/api/scalper/weltrade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'toggle' })
+        });
+        const d = await r.json();
+        toast(d.message || 'Scalper status updated');
+        loadAndRenderWeltradeScalper();
+      } catch (e) {}
+    });
+
+    document.getElementById('scalpLockProfitBtn')?.addEventListener('click', async () => {
+      try {
+        const r = await fetch('/api/scalper/weltrade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'lock_profit' })
+        });
+        const d = await r.json();
+        toast(`<b>🎯 Harvest Locked:</b> ${d.message}`);
+        loadAndRenderWeltradeScalper();
+      } catch (e) {}
+    });
+
+    document.getElementById('scalpResetBreakerBtn')?.addEventListener('click', async () => {
+      try {
+        const r = await fetch('/api/scalper/weltrade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reset_breaker' })
+        });
+        const d = await r.json();
+        toast(`<b>🔄 Breaker Reset:</b> ${d.message}`);
+        loadAndRenderWeltradeScalper();
+      } catch (e) {}
+    });
+
+    document.getElementById('quickScalpExecuteBtn')?.addEventListener('click', async () => {
+      const sym  = document.getElementById('quickScalpSym')?.value || 'SFX Vol 80';
+      const side = document.getElementById('quickScalpSide')?.value || 'BUY';
+      const lot  = +document.getElementById('quickScalpLot')?.value || 0.02;
+      try {
+        const r = await fetch('/api/scalper/weltrade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'trigger_scalp', symbol: sym, side, lot })
+        });
+        const d = await r.json();
+        toast(`<b>🚀 Scalp Dispatched:</b> ${sym} ${side} ${lot} lot queued to Weltrade MT5!`);
+        loadAndRenderWeltradeScalper();
+      } catch (e) {}
+    });
+
+    document.getElementById('matrixSearch')?.addEventListener('input', renderPairMatrixTable);
+    document.getElementById('matrixTierFilter')?.addEventListener('change', renderPairMatrixTable);
+
     renderWatchlist();
     initBacktestUI();
     renderJournal();
     renderPlaybook();
     renderPureSignalsPage();
     loadAndRenderClients();
+    loadAndRenderWeltradeScalper();
+    loadAndRenderPairLearning();
     pollLiveMt5State();
 
     await loadActiveMarket();

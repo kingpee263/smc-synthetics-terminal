@@ -68,6 +68,8 @@
     <button class="vt" data-view="weltrade-charts">📊 Weltrade Charts (#43374418)</button>
     <button class="vt" data-view="deriv-signals">⚡ Deriv Signals <span class="sig-count" id="derivSigCount">0</span></button>
     <button class="vt" data-view="weltrade-signals">🔥 Weltrade Signals <span class="sig-count" id="weltradeSigCount">0</span></button>
+    <button class="vt" data-view="scalper">🎯 Weltrade $50 Scalper <span class="sig-count" id="scalpDailyBadge" style="background:#089981;">$0.00</span></button>
+    <button class="vt" data-view="learning">🧠 Pair Edge Matrix <span class="sig-count" id="alphaPairBadge">8 Alpha</span></button>
     <button class="vt" data-view="clients">👥 Client Accounts &amp; Copier <span class="sig-count" id="clientCountBadge">2</span></button>
     <button class="vt" data-view="backtest">Backtester</button>
     <button class="vt" data-view="journal">Trade Journal</button>
@@ -685,6 +687,210 @@
         </div>
       </div>
     </section>
+  </main>
+
+  <!-- ============ WELTRADE $50/DAY INTELLIGENT MICRO-SCALPER ============ -->
+  <main class="view" id="view-scalper">
+    <div style="display:flex; flex-direction:column; gap:14px; padding:12px; max-width:1400px; margin:0 auto; width:100%;">
+      
+      <!-- Top Hero Radar Card -->
+      <div class="card" style="padding:16px; background:linear-gradient(135deg, rgba(8,153,129,0.12) 0%, rgba(13,20,36,0.95) 100%); border:1px solid rgba(8,153,129,0.4); border-radius:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:18px; font-weight:800; color:#fff;">🎯 Weltrade Institutional Micro-Scalper</span>
+              <span class="st-pill" id="scalpStatusBadge" style="background:#089981; color:#fff; font-weight:700; padding:3px 10px; border-radius:12px;">ACTIVE HUNTING</span>
+              <span style="font-size:12px; color:var(--text-dim);">Account: <b>#43374418</b> (Weltrade-Demo)</span>
+            </div>
+            <p id="scalpStatusDesc" style="margin-top:6px; color:#94a3b8; font-size:13px; font-weight:500;">
+              Hunting 1M/5M high-frequency SMC micro-scalps on Tier-A SyntX pairs. Target: $50.00/day.
+            </p>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button class="btn primary small" id="scalpToggleBtn">⏸ Pause Scalper</button>
+            <button class="btn ghost small" id="scalpLockProfitBtn" style="color:#fbbf24; border-color:#fbbf24;">🔒 Lock $50 Profit</button>
+            <button class="btn ghost small" id="scalpResetBreakerBtn" style="color:#38bdf8; border-color:#38bdf8;">🔄 Reset Breaker</button>
+          </div>
+        </div>
+
+        <!-- Big Progress Bar toward $50 Daily Goal -->
+        <div style="background:rgba(0,0,0,0.4); border-radius:6px; padding:12px 14px; border:1px solid rgba(255,255,255,0.08);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:#94a3b8;">Daily Target Progress</span>
+            <span style="font-size:14px; font-weight:800; color:#fff;" id="scalpProgressText">$0.00 / $50.00 (0%)</span>
+          </div>
+          <div style="background:rgba(255,255,255,0.1); height:14px; border-radius:7px; overflow:hidden; position:relative;">
+            <div id="scalpProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, #089981 0%, #22c55e 100%); transition:width 0.4s ease; border-radius:7px;"></div>
+          </div>
+        </div>
+
+        <!-- 4 Key Scalper KPI Cards -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; margin-top:14px;">
+          <div style="background:rgba(0,0,0,0.35); padding:10px 14px; border-radius:6px; border-left:3px solid #22c55e;">
+            <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600;">Today's Realized PnL</div>
+            <div style="font-size:20px; font-weight:800; color:#22c55e; margin-top:2px;" id="scalpRealizedPnl">$0.00</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:2px;" id="scalpTradesCount">0 trades (0 wins / 0 losses)</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.35); padding:10px 14px; border-radius:6px; border-left:3px solid #38bdf8;">
+            <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600;">Floating Scalp PnL</div>
+            <div style="font-size:20px; font-weight:800; color:#38bdf8; margin-top:2px;" id="scalpFloatingPnl">$0.00</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Live open scalps on Weltrade</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.35); padding:10px 14px; border-radius:6px; border-left:3px solid #f43f5e;">
+            <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600;">Daily Loss Breaker Buffer</div>
+            <div style="font-size:20px; font-weight:800; color:#f43f5e; margin-top:2px;" id="scalpBufferPnl">$15.00</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Hard lockout limit: -$15.00 cap</div>
+          </div>
+          <div style="background:rgba(0,0,0,0.35); padding:10px 14px; border-radius:6px; border-left:3px solid #fbbf24;">
+            <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600;">Recommended Scalp Lot</div>
+            <div style="font-size:20px; font-weight:800; color:#fbbf24; margin-top:2px;" id="scalpLotSize">0.02 Lot</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Micro-scaled to account equity</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Execution Mechanics & Active Scalps Table -->
+      <div style="display:grid; grid-template-columns:1fr 2fr; gap:14px;">
+        <!-- Left: Scalp Protocol Matrix -->
+        <div class="card" style="padding:14px; background:var(--bg-1);">
+          <div class="card-head" style="margin-bottom:10px;">
+            <span style="font-weight:700; color:#38bdf8;">🛡 Zero-Blowup Scalp Protocol</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:10px; font-size:12px; color:var(--text-dim);">
+            <div style="background:var(--bg-0); padding:10px; border-radius:4px; border-left:3px solid #22c55e;">
+              <b style="color:#fff;">1. Quick Breakeven Lock (+1.5R)</b>
+              <p style="margin:4px 0 0; color:#94a3b8;">As soon as trade reaches +1.5R, SL automatically jumps to Entry + Spread. Completely risk-free within minutes.</p>
+            </div>
+            <div style="background:var(--bg-0); padding:10px; border-radius:4px; border-left:3px solid #38bdf8;">
+              <b style="color:#fff;">2. Cash Bank TP1 (+2.0R)</b>
+              <p style="margin:4px 0 0; color:#94a3b8;">Closes 60% of volume at +2.0R to secure cash in the account balance. 40% runner left to trail.</p>
+            </div>
+            <div style="background:var(--bg-0); padding:10px; border-radius:4px; border-left:3px solid #f43f5e;">
+              <b style="color:#fff;">3. -$15.00 Hard Circuit Breaker</b>
+              <p style="margin:4px 0 0; color:#94a3b8;">If 2-3 small trades trigger stops totaling -$15.00, scalper shuts down for the rest of the day. Capital protected.</p>
+            </div>
+            <div style="background:var(--bg-0); padding:10px; border-radius:4px; border-left:3px solid #fbbf24;">
+              <b style="color:#fff;">4. $50 Profit Harvest Lock</b>
+              <p style="margin:4px 0 0; color:#94a3b8;">Once today's profit reaches $50.00, trading halts or drops risk to 0.25% house money only.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Active Scalps & Fast Trigger Panel -->
+        <div class="card" style="padding:14px; background:var(--bg-1);">
+          <div class="card-head" style="margin-bottom:10px;">
+            <span style="font-weight:700; color:#fff;">Live Weltrade Scalp Positions</span>
+            <span class="small muted">Open scalps managed by the engine</span>
+          </div>
+          <div class="table-wrap">
+            <table class="tbl" id="scalpOrdersTable">
+              <thead>
+                <tr>
+                  <th>Ticket</th>
+                  <th>Symbol</th>
+                  <th>Side</th>
+                  <th>Lot</th>
+                  <th>Entry</th>
+                  <th>Current</th>
+                  <th>SL / TP</th>
+                  <th>Profit ($)</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <!-- Quick Micro-Scalp Trigger Bar -->
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border); display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <span style="font-weight:700; font-size:12px; color:#fff;">⚡ 1-Click Scalp:</span>
+            <select id="quickScalpSym" style="background:var(--bg-0); color:#fff; border:1px solid var(--border); padding:5px 8px; border-radius:4px; font-size:12px;">
+              <option value="SFX Vol 80">SFX Vol 80 (Alpha)</option>
+              <option value="MAX GainX 1000">MAX GainX 1000 (Alpha)</option>
+              <option value="FlipX 2">FlipX 2 (Alpha)</option>
+              <option value="SwitchX 1800">SwitchX 1800 (Alpha)</option>
+              <option value="BreakX 600">BreakX 600 (Developing)</option>
+              <option value="FX Vol 20">FX Vol 20 (Developing)</option>
+            </select>
+            <select id="quickScalpSide" style="background:var(--bg-0); color:#fff; border:1px solid var(--border); padding:5px 8px; border-radius:4px; font-size:12px;">
+              <option value="BUY">BUY Micro-Scalp</option>
+              <option value="SELL">SELL Micro-Scalp</option>
+            </select>
+            <input type="number" id="quickScalpLot" value="0.02" step="0.01" min="0.01" max="0.10" style="width:70px; background:var(--bg-0); color:#fff; border:1px solid var(--border); padding:5px 8px; border-radius:4px; font-size:12px;" />
+            <button class="btn primary small" id="quickScalpExecuteBtn">🚀 Execute Micro-Scalp</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ PAIR EDGE MATRIX & ADAPTIVE LEARNING ============ -->
+  <main class="view" id="view-learning">
+    <div style="display:flex; flex-direction:column; gap:14px; padding:12px; max-width:1400px; margin:0 auto; width:100%;">
+      
+      <!-- Top Intelligence Cards -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
+        <div class="card" style="padding:14px; background:var(--bg-1); border-left:4px solid #22c55e;">
+          <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700;">🟢 Tier A (Alpha Elite)</div>
+          <div style="font-size:24px; font-weight:800; color:#22c55e; margin-top:2px;" id="matrixAlphaCount">8 Pairs</div>
+          <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">Win Rate &ge; 65% · High SMC Obedience · Priority Scalp &amp; Sniper</div>
+        </div>
+        <div class="card" style="padding:14px; background:var(--bg-1); border-left:4px solid #fbbf24;">
+          <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700;">🟡 Tier B (Developing)</div>
+          <div style="font-size:24px; font-weight:800; color:#fbbf24; margin-top:2px;" id="matrixDevCount">12 Pairs</div>
+          <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">Win Rate 50%–64% · Standard micro-allocation · Fast 1.5R BE Lock</div>
+        </div>
+        <div class="card" style="padding:14px; background:var(--bg-1); border-left:4px solid #f43f5e;">
+          <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700;">🔴 Tier C (Quarantined)</div>
+          <div style="font-size:24px; font-weight:800; color:#f43f5e; margin-top:2px;" id="matrixQuarCount">4 Pairs</div>
+          <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">Auto-paused from execution · Erratic wicks / negative edge</div>
+        </div>
+        <div class="card" style="padding:14px; background:var(--bg-1); border-left:4px solid #38bdf8;">
+          <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700;">Strategy Obedience Avg</div>
+          <div style="font-size:24px; font-weight:800; color:#38bdf8; margin-top:2px;" id="matrixAvgObedience">78.4%</div>
+          <div style="font-size:11.5px; color:#94a3b8; margin-top:2px;">Continuous ML scoring of FVG fills, OB taps, and liquidity respect</div>
+        </div>
+      </div>
+
+      <!-- Edge Matrix Table -->
+      <div class="card" style="padding:14px; background:var(--bg-1);">
+        <div class="card-head" style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div>
+            <span style="font-weight:700; color:#fff; font-size:14px;">The Edge Matrix · Continuous Pair Learning &amp; Strategy Telemetry</span>
+            <div class="small muted" style="margin-top:2px;">Real-time ranking of synthetic pairs based on strategy win rates, profit factor, and SMC structure obedience</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <input type="search" id="matrixSearch" placeholder="Filter symbol (V75, SFX, Boom, PainX)..." style="background:var(--bg-0); color:#fff; border:1px solid var(--border); padding:5px 8px; border-radius:4px; font-size:12px;" />
+            <select id="matrixTierFilter" style="background:var(--bg-0); color:#fff; border:1px solid var(--border); padding:5px 8px; border-radius:4px; font-size:12px;">
+              <option value="all">All Tiers</option>
+              <option value="TIER_A_ALPHA">Tier A (Alpha Elite)</option>
+              <option value="TIER_B_DEVELOPING">Tier B (Developing)</option>
+              <option value="TIER_C_QUARANTINE">Tier C (Quarantined)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="tbl" id="matrixTable">
+            <thead>
+              <tr>
+                <th>Symbol &amp; Broker</th>
+                <th>SMC Obedience Score</th>
+                <th>Win Rate %</th>
+                <th>Profit Factor</th>
+                <th>Realized PnL ($)</th>
+                <th>Total Deals</th>
+                <th>Avg R:R</th>
+                <th>Dynamic Classification</th>
+                <th>Recommendation</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- ============ REFERENCE & MT5 AUTO-BRIDGE GUIDE ============ -->

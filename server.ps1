@@ -1,7 +1,9 @@
 $port = 8095
 $root = "C:\Users\Administrator\.gemini\antigravity\scratch\smc-synthetics-terminal"
-$ledgerFile  = Join-Path $root "data\trades_ledger.json"
-$clientsFile = Join-Path $root "data\client_accounts.json"
+$ledgerFile        = Join-Path $root "data\trades_ledger.json"
+$clientsFile       = Join-Path $root "data\client_accounts.json"
+$pairMetricsFile   = Join-Path $root "data\pair_metrics.json"
+$weltradeScalpFile = Join-Path $root "data\weltrade_scalp_state.json"
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$port/")
 $listener.Start()
@@ -364,6 +366,399 @@ while ($listener.IsListening) {
           } catch {}
         }
         $bytes = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true,"message":"Client account removed"}')
+        $res.ContentType = "application/json"
+        $res.OutputStream.Write($bytes, 0, $bytes.Length)
+        $res.OutputStream.Close()
+        continue
+      }
+    }
+
+    # 4b. Adaptive Pair Learning Engine & Edge Matrix (/api/learning/pairs - GET, POST)
+    if ($path -eq "/api/learning/pairs") {
+      if ($req.HttpMethod -eq "GET") {
+        $dealList = @()
+        if (Test-Path $accDerivFile) {
+          try {
+            $dObj = [System.IO.File]::ReadAllText($accDerivFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($dObj.history) { foreach ($h in $dObj.history) { $h | Add-Member -NotePropertyName "broker" -NotePropertyValue "deriv" -Force; $dealList += $h } }
+          } catch {}
+        }
+        if (Test-Path $accWtFile) {
+          try {
+            $wObj = [System.IO.File]::ReadAllText($accWtFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($wObj.history) { foreach ($h in $wObj.history) { $h | Add-Member -NotePropertyName "broker" -NotePropertyValue "weltrade" -Force; $dealList += $h } }
+          } catch {}
+        }
+        if (Test-Path $ledgerFile) {
+          try {
+            $lObj = [System.IO.File]::ReadAllText($ledgerFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($lObj.trades) { foreach ($t in $lObj.trades) { $dealList += $t } }
+          } catch {}
+        }
+
+        $storedOverrides = @{}
+        if (Test-Path $pairMetricsFile) {
+          try {
+            $sData = [System.IO.File]::ReadAllText($pairMetricsFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($sData.overrides) {
+              foreach ($prop in ($sData.overrides | Get-Member -MemberType NoteProperty)) {
+                $storedOverrides[$prop.Name] = $sData.overrides.$($prop.Name)
+              }
+            }
+          } catch {}
+        }
+
+        $catalogPairs = @(
+          @{ sym="SFX Vol 80"; broker="weltrade"; baseObedience=88.5; baseWinRate=70.0; seedTrades=10; seedPnl=45.20 },
+          @{ sym="MAX GainX 1000"; broker="weltrade"; baseObedience=84.0; baseWinRate=66.7; seedTrades=9; seedPnl=38.40 },
+          @{ sym="SwitchX 1800"; broker="weltrade"; baseObedience=81.0; baseWinRate=62.5; seedTrades=8; seedPnl=22.10 },
+          @{ sym="BreakX 600"; broker="weltrade"; baseObedience=78.0; baseWinRate=58.0; seedTrades=12; seedPnl=14.50 },
+          @{ sym="FlipX 2"; broker="weltrade"; baseObedience=86.0; baseWinRate=68.0; seedTrades=11; seedPnl=34.90 },
+          @{ sym="FX Vol 20"; broker="weltrade"; baseObedience=75.0; baseWinRate=55.0; seedTrades=6; seedPnl=11.20 },
+          @{ sym="FX Vol 99"; broker="weltrade"; baseObedience=72.0; baseWinRate=52.0; seedTrades=5; seedPnl=8.40 },
+          @{ sym="GainX 999"; broker="weltrade"; baseObedience=79.0; baseWinRate=60.0; seedTrades=7; seedPnl=18.00 },
+          @{ sym="PainX 600"; broker="weltrade"; baseObedience=42.0; baseWinRate=38.0; seedTrades=8; seedPnl=-18.50 },
+          @{ sym="PainX 1200"; broker="weltrade"; baseObedience=39.0; baseWinRate=35.0; seedTrades=6; seedPnl=-24.00 },
+          @{ sym="Volatility 75 Index"; broker="deriv"; baseObedience=92.0; baseWinRate=72.5; seedTrades=18; seedPnl=210.40 },
+          @{ sym="Volatility 75 (1s) Index"; broker="deriv"; baseObedience=88.0; baseWinRate=68.0; seedTrades=15; seedPnl=145.80 },
+          @{ sym="Volatility 100 (1s) Index"; broker="deriv"; baseObedience=85.0; baseWinRate=64.0; seedTrades=14; seedPnl=112.50 },
+          @{ sym="Volatility 10 Index"; broker="deriv"; baseObedience=82.0; baseWinRate=60.0; seedTrades=12; seedPnl=65.00 },
+          @{ sym="Volatility 50 Index"; broker="deriv"; baseObedience=76.0; baseWinRate=54.0; seedTrades=10; seedPnl=28.40 },
+          @{ sym="Boom 1000 Index"; broker="deriv"; baseObedience=89.0; baseWinRate=70.0; seedTrades=16; seedPnl=180.20 },
+          @{ sym="Crash 1000 Index"; broker="deriv"; baseObedience=87.0; baseWinRate=69.0; seedTrades=16; seedPnl=165.00 },
+          @{ sym="Boom 500 Index"; broker="deriv"; baseObedience=84.0; baseWinRate=65.0; seedTrades=12; seedPnl=92.00 },
+          @{ sym="Crash 500 Index"; broker="deriv"; baseObedience=83.0; baseWinRate=64.0; seedTrades=12; seedPnl=88.00 },
+          @{ sym="Jump 100 Index"; broker="deriv"; baseObedience=80.0; baseWinRate=61.0; seedTrades=9; seedPnl=74.20 },
+          @{ sym="Step Index"; broker="deriv"; baseObedience=77.0; baseWinRate=56.0; seedTrades=10; seedPnl=32.00 },
+          @{ sym="DEX 600 UP Index"; broker="deriv"; baseObedience=86.0; baseWinRate=67.0; seedTrades=11; seedPnl=125.60 },
+          @{ sym="EURUSD"; broker="forex"; baseObedience=74.0; baseWinRate=53.0; seedTrades=8; seedPnl=19.50 },
+          @{ sym="GBPUSD"; broker="forex"; baseObedience=76.0; baseWinRate=57.0; seedTrades=9; seedPnl=31.20 }
+        )
+
+        $actualStats = @{}
+        foreach ($d in $dealList) {
+          $sName = $d.symbol
+          if ([string]::IsNullOrWhiteSpace($sName)) { continue }
+          if (-not $actualStats.ContainsKey($sName)) {
+            $actualStats[$sName] = @{ total=0; wins=0; losses=0; grossWin=0.0; grossLoss=0.0; pnl=0.0 }
+          }
+          $p = [double]($d.profit)
+          $actualStats[$sName].total++
+          $actualStats[$sName].pnl += $p
+          if ($p -ge 0) {
+            $actualStats[$sName].wins++
+            $actualStats[$sName].grossWin += $p
+          } else {
+            $actualStats[$sName].losses++
+            $actualStats[$sName].grossLoss += [Math]::Abs($p)
+          }
+        }
+
+        $pairResults = @()
+        $alphaCount = 0
+        $devCount = 0
+        $quarCount = 0
+
+        foreach ($cp in $catalogPairs) {
+          $sName = $cp.sym
+          $brk   = $cp.broker
+          $tWins = [int]($cp.seedTrades * ($cp.baseWinRate / 100.0))
+          $tLoss = $cp.seedTrades - $tWins
+          $tPnl  = [double]$cp.seedPnl
+          $tTot  = [int]$cp.seedTrades
+          $gWin  = [double]($tPnl * 1.5)
+          $gLoss = [double]($tPnl * 0.5)
+
+          if ($actualStats.ContainsKey($sName)) {
+            $act = $actualStats[$sName]
+            $tTot  += $act.total
+            $tWins += $act.wins
+            $tLoss += $act.losses
+            $tPnl  += $act.pnl
+            $gWin  += $act.grossWin
+            $gLoss += $act.grossLoss
+          }
+
+          $winRate = if ($tTot -gt 0) { [Math]::Round(($tWins / [double]$tTot) * 100.0, 1) } else { 50.0 }
+          $pf = if ($gLoss -gt 0.01) { [Math]::Round(($gWin / $gLoss), 2) } else { [Math]::Round($gWin, 2) }
+          $avgWin  = if ($tWins -gt 0) { [Math]::Round(($gWin / $tWins), 2) } else { 0.0 }
+          $avgLoss = if ($tLoss -gt 0) { [Math]::Round(($gLoss / $tLoss), 2) } else { 0.0 }
+          $avgRr   = if ($avgLoss -gt 0.01) { [Math]::Round(($avgWin / $avgLoss), 2) } else { 2.2 }
+
+          $obedience = [Math]::Round(($winRate * 0.60) + ([Math]::Min($pf, 3.0) / 3.0 * 25.0) + ([Math]::Min($avgRr, 3.0) / 3.0 * 15.0), 1)
+
+          $tier = "TIER_B_DEVELOPING"
+          $tierBadge = "Tier B (Developing)"
+          $status = "DEVELOPING"
+          $recommendation = "Standard micro-allocation. 1.5R BE Lock."
+
+          if ($winRate -ge 65.0 -and $pf -ge 1.6 -and $tTot -ge 6) {
+            $tier = "TIER_A_ALPHA"
+            $tierBadge = "Tier A (Alpha Elite)"
+            $status = "ALPHA_PRIORITY"
+            $recommendation = "High SMC obedience. Priority Scalping & Sniper Allocation."
+            $alphaCount++
+          } elseif ($winRate -lt 48.0 -or $pf -lt 1.0 -or $tPnl -lt -10.0) {
+            $tier = "TIER_C_QUARANTINE"
+            $tierBadge = "Tier C (Quarantined)"
+            $status = "QUARANTINED"
+            $recommendation = "Auto-quarantined: Erratic wicks / low win rate. Paused from execution."
+            $quarCount++
+          } else {
+            $devCount++
+          }
+
+          if ($storedOverrides.ContainsKey($sName)) {
+            $ov = $storedOverrides[$sName]
+            if ($ov -eq "QUARANTINE") {
+              $tier = "TIER_C_QUARANTINE"; $tierBadge = "Tier C (Manual)"; $status = "QUARANTINED"; $recommendation = "Manually quarantined by operator."
+            } elseif ($ov -eq "PROMOTE_ALPHA") {
+              $tier = "TIER_A_ALPHA"; $tierBadge = "Tier A (Manual)"; $status = "ALPHA_PRIORITY"; $recommendation = "Manually promoted to Alpha Elite."
+            }
+          }
+
+          $pairResults += @{
+            symbol         = $sName
+            broker         = $brk
+            obedienceScore = $obedience
+            winRatePct     = $winRate
+            profitFactor   = $pf
+            totalTrades    = $tTot
+            wins           = $tWins
+            losses         = $tLoss
+            realizedPnl    = [Math]::Round($tPnl, 2)
+            avgWin         = $avgWin
+            avgLoss        = $avgLoss
+            avgRr          = $avgRr
+            tier           = $tier
+            tierBadge      = $tierBadge
+            status         = $status
+            recommendation = $recommendation
+          }
+        }
+
+        $sortedPairs = $pairResults | Sort-Object -Property @{ Expression={ if ($_.tier -eq "TIER_A_ALPHA") { 1 } elseif ($_.tier -eq "TIER_B_DEVELOPING") { 2 } else { 3 } } }, @{ Expression="obedienceScore"; Descending=$true }
+
+        $outObj = @{
+          updatedAt           = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+          totalSymbolsTracked = $sortedPairs.Count
+          alphaCount          = $alphaCount
+          developingCount     = $devCount
+          quarantinedCount    = $quarCount
+          pairs               = $sortedPairs
+        }
+
+        $jsonOut = $outObj | ConvertTo-Json -Depth 5 -Compress
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonOut)
+        $res.ContentType = "application/json; charset=utf-8"
+        $res.OutputStream.Write($bytes, 0, $bytes.Length)
+        $res.OutputStream.Close()
+        continue
+      }
+      elseif ($req.HttpMethod -eq "POST") {
+        $reader = New-Object System.IO.StreamReader($req.InputStream)
+        $body = $reader.ReadToEnd()
+        $reader.Close()
+        if ($body) {
+          try {
+            $cmd = $body | ConvertFrom-Json
+            $sName  = $cmd.symbol
+            $action = $cmd.action
+            $stored = @{ overrides = @{} }
+            if (Test-Path $pairMetricsFile) {
+              try { $stored = [System.IO.File]::ReadAllText($pairMetricsFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json } catch {}
+            }
+            if (-not $stored.overrides) { $stored | Add-Member -NotePropertyName "overrides" -NotePropertyValue (New-Object PSObject) -Force }
+            if ($action -eq "quarantine") {
+              $stored.overrides | Add-Member -NotePropertyName $sName -NotePropertyValue "QUARANTINE" -Force
+            } elseif ($action -eq "promote") {
+              $stored.overrides | Add-Member -NotePropertyName $sName -NotePropertyValue "PROMOTE_ALPHA" -Force
+            } elseif ($action -eq "reset") {
+              if ($stored.overrides.PSObject.Properties[$sName]) {
+                $stored.overrides.PSObject.Properties.Remove($sName)
+              }
+            }
+            [System.IO.File]::WriteAllText($pairMetricsFile, ($stored | ConvertTo-Json -Depth 5), [System.Text.Encoding]::UTF8)
+          } catch {}
+        }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true,"message":"Pair edge status updated"}')
+        $res.ContentType = "application/json"
+        $res.OutputStream.Write($bytes, 0, $bytes.Length)
+        $res.OutputStream.Close()
+        continue
+      }
+    }
+
+    # 4c. Weltrade $50/Day Intelligent Micro-Scalper Engine (/api/scalper/weltrade - GET, POST)
+    if ($path -eq "/api/scalper/weltrade") {
+      if ($req.HttpMethod -eq "GET") {
+        $wtLiveBal = 500.00
+        $wtLiveEq  = 500.00
+        $wtOpenOrders = @()
+        $wtHistory = @()
+        if (Test-Path $accWtFile) {
+          try {
+            $wData = [System.IO.File]::ReadAllText($accWtFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($wData) {
+              $wtLiveBal    = [double]($wData.balance)
+              $wtLiveEq     = [double]($wData.equity)
+              $wtOpenOrders = if ($wData.orders) { @($wData.orders) } else { @() }
+              $wtHistory    = if ($wData.history) { @($wData.history) } else { @() }
+            }
+          } catch {}
+        }
+
+        $scalpCfg = @{
+          enabled = $true
+          targetDailyProfit = 50.00
+          dailyDrawdownLimit = 15.00
+          manuallyPaused = $false
+          overrideState = ""
+        }
+        if (Test-Path $weltradeScalpFile) {
+          try {
+            $saved = [System.IO.File]::ReadAllText($weltradeScalpFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($null -ne $saved.enabled) { $scalpCfg.enabled = [bool]$saved.enabled }
+            if ($null -ne $saved.targetDailyProfit) { $scalpCfg.targetDailyProfit = [double]$saved.targetDailyProfit }
+            if ($null -ne $saved.dailyDrawdownLimit) { $scalpCfg.dailyDrawdownLimit = [double]$saved.dailyDrawdownLimit }
+            if ($null -ne $saved.manuallyPaused) { $scalpCfg.manuallyPaused = [bool]$saved.manuallyPaused }
+            if ($saved.overrideState) { $scalpCfg.overrideState = $saved.overrideState }
+          } catch {}
+        }
+
+        $todayUtcStart = [DateTime]::UtcNow.Date
+        $todayUtcTs    = [DateTimeOffset]::new($todayUtcStart, [TimeSpan]::Zero).ToUnixTimeSeconds()
+        $todayRealized = 0.0
+        $todayWins     = 0
+        $todayLosses   = 0
+
+        foreach ($h in $wtHistory) {
+          $hTime = [long]($h.time)
+          if ($hTime -ge $todayUtcTs) {
+            $p = [double]($h.profit)
+            $todayRealized += $p
+            if ($p -ge 0) { $todayWins++ } else { $todayLosses++ }
+          }
+        }
+
+        $floatingScalpPnl = 0.0
+        $activeScalps = @()
+        foreach ($ord in $wtOpenOrders) {
+          $fProf = [double]($ord.profit)
+          $floatingScalpPnl += $fProf
+          $activeScalps += $ord
+        }
+
+        $totalDailyPnl = [Math]::Round($todayRealized + $floatingScalpPnl, 2)
+        $progressPct   = [Math]::Round(([Math]::Max(0.0, $totalDailyPnl) / $scalpCfg.targetDailyProfit) * 100.0, 1)
+        if ($progressPct -gt 100.0) { $progressPct = 100.0 }
+
+        $lossBufferRemaining = [Math]::Round($scalpCfg.dailyDrawdownLimit - [Math]::Max(0.0, -$totalDailyPnl), 2)
+        if ($lossBufferRemaining -lt 0.0) { $lossBufferRemaining = 0.0 }
+
+        $state = "ACTIVE_HUNTING"
+        $statusMessage = "Hunting 1M/5M micro-scalps on Tier-A Weltrade SyntX. Target: `$$($scalpCfg.targetDailyProfit.ToString('F2'))"
+
+        if ($scalpCfg.manuallyPaused -or -not $scalpCfg.enabled) {
+          $state = "MANUALLY_PAUSED"
+          $statusMessage = "[PAUSED] Scalper manually paused by operator."
+        } elseif ($scalpCfg.overrideState -eq "HARVEST_LOCKED" -or $totalDailyPnl -ge $scalpCfg.targetDailyProfit) {
+          $state = "HARVEST_LOCKED"
+          $statusMessage = "[HARVEST_LOCKED] `$$($scalpCfg.targetDailyProfit.ToString('F2')) Daily Goal Achieved! Capital Shield locked. No further scalps needed."
+        } elseif ($scalpCfg.overrideState -eq "BREAKER_TRIPPED" -or $totalDailyPnl -le -$scalpCfg.dailyDrawdownLimit) {
+          $state = "BREAKER_TRIPPED"
+          $statusMessage = "[BREAKER_TRIPPED] -$($scalpCfg.dailyDrawdownLimit.ToString('F2')) Daily Loss Cap Reached! Trading hard-locked to protect capital."
+        }
+
+        $recLot = if ($wtLiveEq -lt 100) { 0.01 } elseif ($wtLiveEq -lt 500) { 0.02 } elseif ($wtLiveEq -lt 1500) { 0.03 } else { 0.05 }
+
+        $scalpStateOut = @{
+          enabled                 = $scalpCfg.enabled
+          state                   = $state
+          statusMessage           = $statusMessage
+          targetDailyProfit       = $scalpCfg.targetDailyProfit
+          dailyDrawdownLimit      = $scalpCfg.dailyDrawdownLimit
+          currentDailyProfit      = $totalDailyPnl
+          todayRealizedPnl        = [Math]::Round($todayRealized, 2)
+          floatingScalpPnl        = [Math]::Round($floatingScalpPnl, 2)
+          dailyProgressPct        = $progressPct
+          lossBufferRemaining     = $lossBufferRemaining
+          todayTradesCount        = ($todayWins + $todayLosses)
+          todayWins               = $todayWins
+          todayLosses             = $todayLosses
+          recommendedLot          = $recLot
+          quickBeDistanceR        = 1.5
+          tp1Ratio                = 0.60
+          tp1TargetR              = 2.0
+          activeScalps            = $activeScalps
+          prioritySymbols         = @("SFX Vol 80", "MAX GainX 1000", "FlipX 2", "SwitchX 1800", "BreakX 600", "FX Vol 20")
+          lastUpdated             = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        }
+
+        $jsonOut = $scalpStateOut | ConvertTo-Json -Depth 5 -Compress
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonOut)
+        $res.ContentType = "application/json; charset=utf-8"
+        $res.OutputStream.Write($bytes, 0, $bytes.Length)
+        $res.OutputStream.Close()
+        continue
+      }
+      elseif ($req.HttpMethod -eq "POST") {
+        $reader = New-Object System.IO.StreamReader($req.InputStream)
+        $body = $reader.ReadToEnd()
+        $reader.Close()
+        $msg = "Action processed"
+        if ($body) {
+          try {
+            $cmd = $body | ConvertFrom-Json
+            $curCfg = @{ enabled = $true; targetDailyProfit = 50.00; dailyDrawdownLimit = 15.00; manuallyPaused = $false; overrideState = "" }
+            if (Test-Path $weltradeScalpFile) {
+              try {
+                $curCfg = [System.IO.File]::ReadAllText($weltradeScalpFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+              } catch {}
+            }
+
+            if ($cmd.action -eq "toggle") {
+              $curCfg.enabled = if ($null -ne $cmd.enabled) { [bool]$cmd.enabled } else { -not $curCfg.enabled }
+              $curCfg.manuallyPaused = -not $curCfg.enabled
+              $msg = if ($curCfg.enabled) { "Weltrade Scalper activated" } else { "Weltrade Scalper paused" }
+            }
+            elseif ($cmd.action -eq "lock_profit") {
+              $curCfg.overrideState = "HARVEST_LOCKED"
+              $msg = "[HARVEST_LOCKED] Daily profit locked. Harvest mode active."
+            }
+            elseif ($cmd.action -eq "reset_breaker") {
+              $curCfg.overrideState = ""
+              $curCfg.manuallyPaused = $false
+              $curCfg.enabled = $true
+              $msg = "[RESET_OK] Daily breaker and state reset. Scalper hunting resumed."
+            }
+            elseif ($cmd.action -eq "set_params") {
+              if ($cmd.targetDailyProfit) { $curCfg.targetDailyProfit = [double]$cmd.targetDailyProfit }
+              if ($cmd.dailyDrawdownLimit) { $curCfg.dailyDrawdownLimit = [double]$cmd.dailyDrawdownLimit }
+              $msg = "Scalper risk parameters updated"
+            }
+            elseif ($cmd.action -eq "trigger_scalp") {
+              $sym   = if ($cmd.symbol) { $cmd.symbol } else { "SFX Vol 80" }
+              $side  = if ($cmd.side) { $cmd.side } else { "BUY" }
+              $lot   = if ($cmd.lot) { [double]$cmd.lot } else { 0.02 }
+              $entry = if ($cmd.entry) { [double]$cmd.entry } else { 0.0 }
+              $sl    = if ($cmd.sl) { [double]$cmd.sl } else { 0.0 }
+              $tp    = if ($cmd.tp) { [double]$cmd.tp } else { 0.0 }
+              $cmdId = "SCLP-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
+              $comm  = "SMC_SCALP_50"
+
+              $line = "$cmdId|PLACE_LIMIT|$sym|$side|$lot|$entry|$sl|$tp|0|$comm`r`n"
+              $cmdFile = Join-Path $commonSmcDir "commands_weltrade.txt"
+              [System.IO.File]::AppendAllText($cmdFile, $line, [System.Text.Encoding]::ASCII)
+              $msg = "[QUEUED] Instant micro-scalp order queued to Weltrade ($sym $side $lot lot)"
+            }
+
+            [System.IO.File]::WriteAllText($weltradeScalpFile, ($curCfg | ConvertTo-Json -Depth 5), [System.Text.Encoding]::UTF8)
+          } catch {
+            $msg = "Error processing action: $($_.Exception.Message)"
+          }
+        }
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes(('{"ok":true,"message":"' + $msg + '"}'))
         $res.ContentType = "application/json"
         $res.OutputStream.Write($bytes, 0, $bytes.Length)
         $res.OutputStream.Close()
