@@ -780,6 +780,78 @@ while ($listener.IsListening) {
       }
     }
 
+    # 4d. Dual-Broker 1-Minute Quick Scalp Engine (/api/scalper/quick - POST)
+    if ($path -eq "/api/scalper/quick" -and $req.HttpMethod -eq "POST") {
+      $reader = New-Object System.IO.StreamReader($req.InputStream)
+      $body = $reader.ReadToEnd()
+      $reader.Close()
+      $quickRes = @{ ok = $false; message = "No action taken" }
+      if ($body) {
+        try {
+          $cmd = $body | ConvertFrom-Json
+          $brokerReq = if ($cmd.broker) { $cmd.broker.ToLower() } else { "both" }
+          $lotReq    = if ($cmd.lot) { [double]$cmd.lot } else { 0.01 }
+          $sideReq   = if ($cmd.side) { $cmd.side.ToUpper() } else { "AUTO" }
+          $symReq    = if ($cmd.symbol) { $cmd.symbol } else { "" }
+
+          $dispatched = @()
+
+          # Deriv Execution
+          if ($brokerReq -eq "deriv" -or $brokerReq -eq "both") {
+            $derivSym = $symReq
+            if ([string]::IsNullOrWhiteSpace($derivSym) -or $derivSym -match "Pain|Gain|Flip|Switch|BreakX|FX Vol|SFX Vol") {
+              $derivSym = "Boom 1000 Index"
+            }
+            $sideD = $sideReq
+            if ($sideD -eq "AUTO") {
+              $sideD = if ($derivSym -match "Crash") { "SELL" } else { "BUY" }
+            }
+            $cmdIdD = "QSC-DRV-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
+            $commD  = "QUICK_SCALP_M1"
+            $lineD  = "$cmdIdD|PLACE_MARKET|$derivSym|$sideD|$lotReq|0|0|0|0|$commD`r`n"
+            $qFileD = Join-Path $commonSmcDir "commands_deriv.txt"
+            [System.IO.File]::AppendAllText($qFileD, $lineD, [System.Text.Encoding]::ASCII)
+            $dispatched += "Deriv ($derivSym $sideD $lotReq lot)"
+          }
+
+          # Weltrade Execution
+          if ($brokerReq -eq "weltrade" -or $brokerReq -eq "both") {
+            $wtSym = $symReq
+            if ([string]::IsNullOrWhiteSpace($wtSym) -or -not ($wtSym -match "Pain|Gain|Flip|Switch|BreakX|FX Vol|SFX Vol")) {
+              $wtSym = "SFX Vol 80"
+            }
+            # Toxic check
+            if ($wtSym -match "PAINX 1200|PAINX 600|VOLATILITY 50 INDEX|1HZ50V") {
+              $wtSym = "FlipX 2"
+            }
+            $sideW = $sideReq
+            if ($sideW -eq "AUTO") {
+              $sideW = "BUY"
+            }
+            $cmdIdW = "QSC-WLT-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
+            $commW  = "QUICK_SCALP_M1"
+            $lineW  = "$cmdIdW|PLACE_MARKET|$wtSym|$sideW|$lotReq|0|0|0|0|$commW`r`n"
+            $qFileW = Join-Path $commonSmcDir "commands_weltrade.txt"
+            [System.IO.File]::AppendAllText($qFileW, $lineW, [System.Text.Encoding]::ASCII)
+            $dispatched += "Weltrade ($wtSym $sideW $lotReq lot)"
+          }
+
+          $quickRes = @{
+            ok = $true
+            message = "Quick Scalp Market Order Dispatched: " + ($dispatched -join " & ")
+            dispatched = $dispatched
+          }
+        } catch {
+          $quickRes = @{ ok = $false; message = "Quick scalp error: $($_.Exception.Message)" }
+        }
+      }
+      $bytes = [System.Text.Encoding]::UTF8.GetBytes(($quickRes | ConvertTo-Json -Depth 3))
+      $res.ContentType = "application/json"
+      $res.OutputStream.Write($bytes, 0, $bytes.Length)
+      $res.OutputStream.Close()
+      continue
+    }
+
     # 5. MT5 Command Queue & Multi-Account Copier Fan-Out
     if ($path -eq "/api/mt5/command" -and $req.HttpMethod -eq "POST") {
       $reader = New-Object System.IO.StreamReader($req.InputStream)

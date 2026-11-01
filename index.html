@@ -51,6 +51,16 @@
     </div>
 
     <div class="top-actions">
+      <!-- 1-Click Quick Scalp Master Controller -->
+      <div style="display:flex; gap:4px; align-items:center; background:rgba(0,0,0,0.4); padding:3px 6px; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
+        <button class="btn primary small" id="quickScalpBothBtn" style="background:linear-gradient(135deg, #2563eb, #059669); font-weight:700; padding:4px 9px;" title="Instantly fire 1M quick scalp on both Deriv &amp; Weltrade (Closes immediately when in green profit)">⚡ Quick Scalp (Both)</button>
+        <button class="btn ghost small" id="quickScalpDerivBtn" style="padding:4px 7px; color:#38bdf8; border-color:#38bdf8;" title="Fire 1M quick scalp on Deriv only">⚡ Deriv</button>
+        <button class="btn ghost small" id="quickScalpWeltradeBtn" style="padding:4px 7px; color:#22c55e; border-color:#22c55e;" title="Fire 1M quick scalp on Weltrade only">🔥 Weltrade</button>
+        <label class="tog small" style="margin:0 4px; font-size:11px;" title="Continuous 1M Scalper loop: auto-snipes and auto-banks green profit until daily targets are met">
+          <input type="checkbox" id="togQuickScalpLoop" /> Loop
+        </label>
+      </div>
+
       <label class="tog" style="background:rgba(8,153,129,0.14); border:1px solid #089981; padding:4px 8px; border-radius:4px; color:#26a69a; font-weight:700;" title="Automatically execute Pure A+ Limit Orders, SL, TP, and X1/X2/X3 trailing stops on Deriv (#32398784) &amp; Weltrade (#43374418)">
         <input type="checkbox" id="togAutoTrade" checked /> ⚡ Pure A+ Auto-Trade (Deriv &amp; Weltrade)
       </label>

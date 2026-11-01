@@ -2756,6 +2756,52 @@
       } catch (e) {}
     });
 
+    async function triggerQuickScalpOrder(brokerTarget) {
+      try {
+        const lot = 0.01;
+        const r = await fetch('/api/scalper/quick', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ broker: brokerTarget, lot: lot, side: 'AUTO' })
+        });
+        const d = await r.json();
+        if (d.ok) {
+          toast(`<b>⚡ 1M Quick Scalp Fired:</b> ${d.message}`);
+        } else {
+          toast(`<b>⚠️ Scalp Notice:</b> ${d.message}`);
+        }
+        pollLiveMt5State();
+      } catch (e) {
+        toast(`<b>⚠️ Network:</b> Failed to dispatch quick scalp`);
+      }
+    }
+
+    document.getElementById('quickScalpBothBtn')?.addEventListener('click', () => triggerQuickScalpOrder('both'));
+    document.getElementById('quickScalpDerivBtn')?.addEventListener('click', () => triggerQuickScalpOrder('deriv'));
+    document.getElementById('quickScalpWeltradeBtn')?.addEventListener('click', () => triggerQuickScalpOrder('weltrade'));
+
+    // Continuous 1M Quick Scalp Loop
+    let quickScalpLoopInterval = null;
+    document.getElementById('togQuickScalpLoop')?.addEventListener('change', (e) => {
+      const isLoop = e.target.checked;
+      if (isLoop) {
+        toast(`<b>🔁 1M Quick Scalp Loop ACTIVATED:</b> Sniping and auto-banking green trades across Deriv & Weltrade.`);
+        triggerQuickScalpOrder('both');
+        if (quickScalpLoopInterval) clearInterval(quickScalpLoopInterval);
+        quickScalpLoopInterval = setInterval(() => {
+          // If no active orders, fire next micro-scalp
+          const liveCount = (state.mt5Orders && state.mt5Orders.length) || 0;
+          if (liveCount === 0) {
+            triggerQuickScalpOrder('both');
+          }
+        }, 12000);
+      } else {
+        if (quickScalpLoopInterval) clearInterval(quickScalpLoopInterval);
+        quickScalpLoopInterval = null;
+        toast(`<b>⏸ Quick Scalp Loop Paused.</b>`);
+      }
+    });
+
     document.getElementById('quickScalpExecuteBtn')?.addEventListener('click', async () => {
       const sym  = document.getElementById('quickScalpSym')?.value || 'SFX Vol 80';
       const side = document.getElementById('quickScalpSide')?.value || 'BUY';

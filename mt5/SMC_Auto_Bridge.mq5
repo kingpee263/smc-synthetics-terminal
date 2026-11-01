@@ -18,6 +18,8 @@ input bool   InpEnableAutoExe     = true;     // Enable Pure A+ Auto-Trading & X
 input bool   InpNativeAPlusScan   = true;     // Run Native MQL5 Pure A+ Scanner (H1 -> M5)
 input bool   InpEnablePartialTP1  = true;     // Bank 50% Volume at TP1 (1.5R) + Move SL to BE
 input double InpPartialTP1R       = 1.50;     // R-Multiple Trigger for 50% Partial TP1 Banking
+input bool   InpQuickScalpCloseOnProfit = true; // Auto-Bank & Close Quick Scalps immediately when green
+input double InpQuickScalpMinProfitUsd  = 0.50; // Minimum net profit ($) to auto-close Quick Scalp trade
 input double InpMaxSpreadToSLPct  = 18.0;     // Max Spread as % of SL Distance (Spread Guard)
 input double InpRiskPercent       = 1.00;     // Risk per Pure A+ Trade (% of Equity)
 input double InpMaxRiskPercent    = 2.50;     // Hard Max Risk Cap per Trade (%)
@@ -386,9 +388,12 @@ bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBloc
 //+------------------------------------------------------------------+
 bool CanOpenNewTrade(const string sym, const string comment, string &outReason)
 {
-   if(StringFind(comment, "APLUS") < 0 && StringFind(comment, "A+") < 0)
+   bool isPureAPlus   = (StringFind(comment, "APLUS") >= 0 || StringFind(comment, "A+") >= 0);
+   bool isQuickScalp  = (StringFind(comment, "SCALP") >= 0);
+
+   if(!isPureAPlus && !isQuickScalp)
    {
-      outReason = "Regular Trade Blocked (Requires Pure A+ 7/7 Confluence)";
+      outReason = "Regular Trade Blocked (Requires Pure A+ 7/7 Confluence or Quick Scalp)";
       return false;
    }
 
@@ -831,6 +836,27 @@ void ManageOpenPositionsAndTrailing()
 
       double profitDist = isBuy ? (curP - openP) : (openP - curP);
       double currentR   = profitDist / initRisk;
+      double curNetPnl  = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+      string posComm    = PositionGetString(POSITION_COMMENT);
+
+      // ===================================================================
+      // 0. QUICK SCALP AUTO-BANKER: Close instantly when in profit
+      // If position has "SCALP" comment and is green (+$0.50+ or >= +0.50R)
+      // ===================================================================
+      if(InpQuickScalpCloseOnProfit && StringFind(posComm, "SCALP") >= 0)
+      {
+         if(curNetPnl >= InpQuickScalpMinProfitUsd || currentR >= 0.50)
+         {
+            ConfigureSymbolFilling(sym);
+            if(g_trade.PositionClose(ticket))
+            {
+               Print("SMC_Auto_Bridge [QUICK SCALP BANKED] Ticket #", ticket, " (", sym,
+                     "): Closed in GREEN Profit! Net=+$", DoubleToString(curNetPnl, 2),
+                     " (R=+", DoubleToString(currentR, 2), ") Comment=", posComm);
+               continue;
+            }
+         }
+      }
 
       // Check whether SL is already locked at/beyond Breakeven
       bool alreadyAtBE = isBuy ? (curSl >= openP - point) : (curSl > 0.0 && curSl <= openP + point);
@@ -1465,6 +1491,68 @@ void ProcessQueueFile(const string cmdPath)
          bool   isBuy   = (side == "BUY" || side == "BUY_LIMIT");
 
          ExecuteVerifiedAPlusTrade(cmdId, sym, isBuy, entry, sl, tp, comment);
+      }
+      else if(action == "PLACE_MARKET" && p >= 8)
+      {
+         string sym     = parts[2];
+         string side    = parts[3];
+         double lotReq  = StringToDouble(parts[4]);
+         double entry   = StringToDouble(parts[5]);
+         double sl      = StringToDouble(parts[6]);
+         double tp      = StringToDouble(parts[7]);
+         string comment = (p >= 10) ? parts[9] : "QUICK_SCALP_M1";
+         bool   isBuy   = (side == "BUY" || side == "BUY_LIMIT");
+
+         if(!SymbolInfoInteger(sym, SYMBOL_SELECT))
+            SymbolSelect(sym, true);
+
+         string blockReason = "";
+         if(!CanOpenNewTrade(sym, comment, blockReason))
+         {
+            Print("SMC_Auto_Bridge [", cmdId, "] QUICK SCALP SKIPPED ", sym, ": ", blockReason);
+         }
+         else
+         {
+            ConfigureSymbolFilling(sym);
+            double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+            double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+            double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+            int stopsLvl = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
+            double minStopDist = MathMax((double)stopsLvl * point, point * 10.0);
+
+            double volMin  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+            double volMax  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
+            double volStep = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+            if(volMin <= 0.0) volMin = 0.01;
+            if(volStep <= 0.0) volStep = 0.01;
+            double lots = (lotReq > 0.0) ? lotReq : volMin;
+            lots = MathFloor(lots / volStep) * volStep;
+            if(lots < volMin) lots = volMin;
+            if(volMax > 0.0 && lots > volMax) lots = volMax;
+
+            double mktSl = sl;
+            double mktTp = tp;
+            if(isBuy)
+            {
+               if(mktSl <= 0.0 || mktSl >= ask - minStopDist)
+                  mktSl = NormalizePrice(sym, ask - MathMax(point * 50.0, minStopDist * 1.5));
+               if(mktTp <= 0.0 || mktTp <= ask + minStopDist)
+                  mktTp = NormalizePrice(sym, ask + MathMax(point * 100.0, minStopDist * 3.0));
+               bool ok = g_trade.Buy(lots, sym, 0.0, mktSl, mktTp, comment);
+               Print("SMC_Auto_Bridge [", cmdId, "] QUICK SCALP BUY MARKET ", sym, " Lot=", lots,
+                     " SL=", mktSl, " TP=", mktTp, " -> ", (ok ? "EXECUTED" : "FAILED (" + IntegerToString(GetLastError()) + ")"));
+            }
+            else
+            {
+               if(mktSl <= 0.0 || mktSl <= bid + minStopDist)
+                  mktSl = NormalizePrice(sym, bid + MathMax(point * 50.0, minStopDist * 1.5));
+               if(mktTp <= 0.0 || mktTp >= bid - minStopDist)
+                  mktTp = NormalizePrice(sym, bid - MathMax(point * 100.0, minStopDist * 3.0));
+               bool ok = g_trade.Sell(lots, sym, 0.0, mktSl, mktTp, comment);
+               Print("SMC_Auto_Bridge [", cmdId, "] QUICK SCALP SELL MARKET ", sym, " Lot=", lots,
+                     " SL=", mktSl, " TP=", mktTp, " -> ", (ok ? "EXECUTED" : "FAILED (" + IntegerToString(GetLastError()) + ")"));
+            }
+         }
       }
       else if(action == "MODIFY_SLTP" && p >= 9)
       {
