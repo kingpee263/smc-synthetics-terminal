@@ -747,6 +747,291 @@
     return { checks, grade, passes, total: applicable.length };
   }
 
+  /* ---------------- Pure Price Action Patterns (Double Top/Bottom, Rising/Falling Wedge) ---------------- */
+  function detectPriceActionPatterns(candles, market, pair, o) {
+    if (!candles || candles.length < 35) return [];
+    const out = [];
+    const a = atr(candles, candles.length - 1, 14);
+    if (!a) return [];
+
+    const curBar = candles.length - 1;
+    const curPrice = candles[curBar].close;
+
+    // --- Pattern 1: Double Top (M-Pattern Bearish Reversal) ---
+    let p1 = -1, p2 = -1;
+    for (let i = curBar - 2; i >= Math.max(3, curBar - 45); i--) {
+      const isHigh = (candles[i].high > candles[i - 1].high && candles[i].high > candles[i - 2].high &&
+                      candles[i].high >= candles[i + 1].high && candles[i].high >= candles[i + 2].high);
+      if (isHigh) {
+        if (p2 < 0) p2 = i;
+        else if (p1 < 0 && (p2 - i) >= 4) { p1 = i; break; }
+      }
+    }
+    if (p1 >= 0 && p2 >= 0) {
+      let neckIdx = p1, neckPrice = Infinity;
+      for (let k = p1 + 1; k < p2; k++) {
+        if (candles[k].low < neckPrice) { neckPrice = candles[k].low; neckIdx = k; }
+      }
+      const p1P = candles[p1].high, p2P = candles[p2].high;
+      const height = Math.max(p1P, p2P) - neckPrice;
+      const diff = Math.abs(p1P - p2P);
+
+      if (height >= a * 0.9 && diff <= a * 0.40 && curPrice <= Math.max(p1P, p2P) + a * 0.20) {
+        const isNeckBreak = curPrice <= neckPrice + a * 0.15 && candles[curBar].close < candles[curBar].open;
+        const isPeakReject = curPrice < p2P - a * 0.30 && (curBar - p2) <= 8 && candles[curBar].close < candles[curBar].open;
+        if (isNeckBreak || isPeakReject) {
+          const sl = Math.max(p1P, p2P) + a * 0.25;
+          const risk = Math.max(sl - curPrice, a * 0.35);
+          const tp1 = curPrice - Math.max(height * 0.618, risk * 1.5);
+          const tp2 = curPrice - Math.max(height * 1.25, risk * (o.minRR || 2.5));
+          const rr1 = risk > 0 ? (curPrice - tp1) / risk : 0;
+          const rr2 = risk > 0 ? (curPrice - tp2) / risk : 0;
+          out.push({
+            id: `${market.id}|${pair?.key || 'M5'}|DT|${candles[curBar].time}`,
+            market,
+            pair,
+            dir: 'SELL',
+            isBear: true,
+            patternType: 'DOUBLE_TOP',
+            patternName: 'Double Top (M-Pattern Reversal)',
+            structType: 'Double Top (M)',
+            entry: curPrice,
+            sl,
+            tp1,
+            tp2,
+            risk,
+            rr1,
+            rr2,
+            mid: neckPrice,
+            crth: Math.max(p1P, p2P),
+            crtl: neckPrice,
+            state: 'IN_TRADE',
+            c1Idx: curBar,
+            entryIdx: curBar,
+            keyLevels: [
+              { type: 'PEAK1', price: p1P, time: candles[p1].time },
+              { type: 'PEAK2', price: p2P, time: candles[p2].time },
+              { type: 'NECK', price: neckPrice, time: candles[neckIdx].time }
+            ],
+            time: { status: 'pass', text: 'Double Top (M) Pattern Breakout Confirmed' },
+            smt: { status: 'pass', text: `Symmetric Peaks ($${p1P.toFixed(2)} & $${p2P.toFixed(2)}) + Neckline Breakdown` },
+            crtType: { id: 1, name: 'Double Top Reversal' },
+            checks: [
+              { key: 'pa1', title: '1 · Symmetrical Dual Peaks (M-Pattern)', status: 'pass', text: `Peak 1: ${p1P.toFixed(2)} · Peak 2: ${p2P.toFixed(2)} (Diff: ${(diff).toFixed(2)})` },
+              { key: 'pa2', title: '2 · Defined Neckline Support', status: 'pass', text: `Neckline at ${neckPrice.toFixed(2)} · Pattern Height: ${height.toFixed(2)}` },
+              { key: 'pa3', title: '3 · Breakout / Rejection Confirmation', status: 'pass', text: isNeckBreak ? 'Confirmed Neckline Breakdown' : 'Peak 2 Bearish Rejection' },
+              { key: 'pa4', title: '4 · Institutional Risk-to-Reward Ratio', status: rr2 >= 2.0 ? 'pass' : 'warn', text: `TP1 ${rr1.toFixed(1)}R · TP2 ${rr2.toFixed(1)}R` }
+            ],
+            grade: 'A+'
+          });
+        }
+      }
+    }
+
+    // --- Pattern 2: Double Bottom (W-Pattern Bullish Reversal) ---
+    let t1 = -1, t2 = -1;
+    for (let i = curBar - 2; i >= Math.max(3, curBar - 45); i--) {
+      const isLow = (candles[i].low < candles[i - 1].low && candles[i].low < candles[i - 2].low &&
+                     candles[i].low <= candles[i + 1].low && candles[i].low <= candles[i + 2].low);
+      if (isLow) {
+        if (t2 < 0) t2 = i;
+        else if (t1 < 0 && (t2 - i) >= 4) { t1 = i; break; }
+      }
+    }
+    if (t1 >= 0 && t2 >= 0) {
+      let neckIdx = t1, neckPrice = -Infinity;
+      for (let k = t1 + 1; k < t2; k++) {
+        if (candles[k].high > neckPrice) { neckPrice = candles[k].high; neckIdx = k; }
+      }
+      const t1P = candles[t1].low, t2P = candles[t2].low;
+      const height = neckPrice - Math.min(t1P, t2P);
+      const diff = Math.abs(t1P - t2P);
+
+      if (height >= a * 0.9 && diff <= a * 0.40 && curPrice >= Math.min(t1P, t2P) - a * 0.20) {
+        const isNeckBreak = curPrice >= neckPrice - a * 0.15 && candles[curBar].close > candles[curBar].open;
+        const isTroughReject = curPrice > t2P + a * 0.30 && (curBar - t2) <= 8 && candles[curBar].close > candles[curBar].open;
+        if (isNeckBreak || isTroughReject) {
+          const sl = Math.min(t1P, t2P) - a * 0.25;
+          const risk = Math.max(curPrice - sl, a * 0.35);
+          const tp1 = curPrice + Math.max(height * 0.618, risk * 1.5);
+          const tp2 = curPrice + Math.max(height * 1.25, risk * (o.minRR || 2.5));
+          const rr1 = risk > 0 ? (tp1 - curPrice) / risk : 0;
+          const rr2 = risk > 0 ? (tp2 - curPrice) / risk : 0;
+          out.push({
+            id: `${market.id}|${pair?.key || 'M5'}|DB|${candles[curBar].time}`,
+            market,
+            pair,
+            dir: 'BUY',
+            isBear: false,
+            patternType: 'DOUBLE_BOTTOM',
+            patternName: 'Double Bottom (W-Pattern Reversal)',
+            structType: 'Double Bottom (W)',
+            entry: curPrice,
+            sl,
+            tp1,
+            tp2,
+            risk,
+            rr1,
+            rr2,
+            mid: neckPrice,
+            crth: neckPrice,
+            crtl: Math.min(t1P, t2P),
+            state: 'IN_TRADE',
+            c1Idx: curBar,
+            entryIdx: curBar,
+            keyLevels: [
+              { type: 'TROUGH1', price: t1P, time: candles[t1].time },
+              { type: 'TROUGH2', price: t2P, time: candles[t2].time },
+              { type: 'NECK', price: neckPrice, time: candles[neckIdx].time }
+            ],
+            time: { status: 'pass', text: 'Double Bottom (W) Pattern Breakout Confirmed' },
+            smt: { status: 'pass', text: `Symmetric Troughs ($${t1P.toFixed(2)} & $${t2P.toFixed(2)}) + Neckline Breakout` },
+            crtType: { id: 2, name: 'Double Bottom Reversal' },
+            checks: [
+              { key: 'pa1', title: '1 · Symmetrical Dual Troughs (W-Pattern)', status: 'pass', text: `Trough 1: ${t1P.toFixed(2)} · Trough 2: ${t2P.toFixed(2)} (Diff: ${(diff).toFixed(2)})` },
+              { key: 'pa2', title: '2 · Defined Neckline Resistance', status: 'pass', text: `Neckline at ${neckPrice.toFixed(2)} · Pattern Height: ${height.toFixed(2)}` },
+              { key: 'pa3', title: '3 · Breakout / Bounce Confirmation', status: 'pass', text: isNeckBreak ? 'Confirmed Neckline Breakout' : 'Trough 2 Bullish Bounce' },
+              { key: 'pa4', title: '4 · Institutional Risk-to-Reward Ratio', status: rr2 >= 2.0 ? 'pass' : 'warn', text: `TP1 ${rr1.toFixed(1)}R · TP2 ${rr2.toFixed(1)}R` }
+            ],
+            grade: 'A+'
+          });
+        }
+      }
+    }
+
+    // --- Pattern 3: Rising Wedge (Bearish Breakdown) ---
+    let h1 = -1, h2 = -1, l1 = -1, l2 = -1;
+    for (let i = curBar - 2; i >= Math.max(2, curBar - 35); i--) {
+      if (candles[i].high > candles[i - 1].high && candles[i].high >= candles[i + 1].high) {
+        if (h2 < 0) h2 = i; else if (h1 < 0 && (h2 - i) >= 4) h1 = i;
+      }
+      if (candles[i].low < candles[i - 1].low && candles[i].low <= candles[i + 1].low) {
+        if (l2 < 0) l2 = i; else if (l1 < 0 && (l2 - i) >= 4) l1 = i;
+      }
+      if (h1 >= 0 && h2 >= 0 && l1 >= 0 && l2 >= 0) break;
+    }
+    if (h1 >= 0 && h2 >= 0 && l1 >= 0 && l2 >= 0) {
+      const hp1 = candles[h1].high, hp2 = candles[h2].high;
+      const lp1 = candles[l1].low, lp2 = candles[l2].low;
+      if (hp2 > hp1 && lp2 > lp1) {
+        const slopeH = (hp2 - hp1) / (h2 - h1);
+        const slopeL = (lp2 - lp1) / (l2 - l1);
+        const initWidth = Math.abs(hp1 - lp1);
+        const apexWidth = Math.abs(hp2 - lp2);
+        if (slopeL > slopeH && slopeH > 0 && apexWidth < initWidth * 0.9) {
+          const supAtNow = lp1 + slopeL * (curBar - l1);
+          if (curPrice < supAtNow + a * 0.05 && candles[curBar].close < candles[curBar].open) {
+            const sl = hp2 + a * 0.25;
+            const risk = Math.max(sl - curPrice, a * 0.35);
+            const tp1 = curPrice - Math.max(initWidth * 0.618, risk * 1.5);
+            const tp2 = curPrice - Math.max(initWidth * 1.25, risk * (o.minRR || 2.5));
+            const rr1 = risk > 0 ? (curPrice - tp1) / risk : 0;
+            const rr2 = risk > 0 ? (curPrice - tp2) / risk : 0;
+            out.push({
+              id: `${market.id}|${pair?.key || 'M5'}|RW|${candles[curBar].time}`,
+              market,
+              pair,
+              dir: 'SELL',
+              isBear: true,
+              patternType: 'RISING_WEDGE',
+              patternName: 'Rising Wedge Breakdown',
+              structType: 'Rising Wedge',
+              entry: curPrice,
+              sl,
+              tp1,
+              tp2,
+              risk,
+              rr1,
+              rr2,
+              mid: (hp2 + lp2) / 2,
+              crth: hp2,
+              crtl: lp1,
+              state: 'IN_TRADE',
+              c1Idx: curBar,
+              entryIdx: curBar,
+              keyLevels: [
+                { type: 'WEDGE_APEX', price: hp2, time: candles[h2].time },
+                { type: 'WEDGE_BASE', price: lp1, time: candles[l1].time }
+              ],
+              time: { status: 'pass', text: 'Rising Wedge Breakdown Confirmed' },
+              smt: { status: 'pass', text: 'Converging Ascending Support & Resistance Trendlines' },
+              crtType: { id: 3, name: 'Rising Wedge Breakdown' },
+              checks: [
+                { key: 'pa1', title: '1 · Converging Ascending Channels', status: 'pass', text: `Support Slope: +${slopeL.toFixed(2)} > Res Slope: +${slopeH.toFixed(2)}` },
+                { key: 'pa2', title: '2 · Volatility & Range Contraction', status: 'pass', text: `Initial Range: ${initWidth.toFixed(2)} -> Apex Range: ${apexWidth.toFixed(2)}` },
+                { key: 'pa3', title: '3 · Trendline Breakdown', status: 'pass', text: 'Confirmed Bearish Breakdown below ascending support' },
+                { key: 'pa4', title: '4 · Institutional Risk-to-Reward Ratio', status: rr2 >= 2.0 ? 'pass' : 'warn', text: `TP1 ${rr1.toFixed(1)}R · TP2 ${rr2.toFixed(1)}R` }
+              ],
+              grade: 'A+'
+            });
+          }
+        }
+      }
+    }
+
+    // --- Pattern 4: Falling Wedge (Bullish Breakout) ---
+    if (h1 >= 0 && h2 >= 0 && l1 >= 0 && l2 >= 0) {
+      const hp1 = candles[h1].high, hp2 = candles[h2].high;
+      const lp1 = candles[l1].low, lp2 = candles[l2].low;
+      if (hp2 < hp1 && lp2 < lp1) {
+        const slopeH = (hp2 - hp1) / (h2 - h1);
+        const slopeL = (lp2 - lp1) / (l2 - l1);
+        const initWidth = Math.abs(hp1 - lp1);
+        const apexWidth = Math.abs(hp2 - lp2);
+        if (slopeH < slopeL && slopeH < 0 && apexWidth < initWidth * 0.9) {
+          const resAtNow = hp1 + slopeH * (curBar - h1);
+          if (curPrice > resAtNow - a * 0.05 && candles[curBar].close > candles[curBar].open) {
+            const sl = lp2 - a * 0.25;
+            const risk = Math.max(curPrice - sl, a * 0.35);
+            const tp1 = curPrice + Math.max(initWidth * 0.618, risk * 1.5);
+            const tp2 = curPrice + Math.max(initWidth * 1.25, risk * (o.minRR || 2.5));
+            const rr1 = risk > 0 ? (tp1 - curPrice) / risk : 0;
+            const rr2 = risk > 0 ? (tp2 - curPrice) / risk : 0;
+            out.push({
+              id: `${market.id}|${pair?.key || 'M5'}|FW|${candles[curBar].time}`,
+              market,
+              pair,
+              dir: 'BUY',
+              isBear: false,
+              patternType: 'FALLING_WEDGE',
+              patternName: 'Falling Wedge Breakout',
+              structType: 'Falling Wedge',
+              entry: curPrice,
+              sl,
+              tp1,
+              tp2,
+              risk,
+              rr1,
+              rr2,
+              mid: (hp2 + lp2) / 2,
+              crth: hp1,
+              crtl: lp2,
+              state: 'IN_TRADE',
+              c1Idx: curBar,
+              entryIdx: curBar,
+              keyLevels: [
+                { type: 'WEDGE_BASE', price: hp1, time: candles[h1].time },
+                { type: 'WEDGE_APEX', price: lp2, time: candles[l2].time }
+              ],
+              time: { status: 'pass', text: 'Falling Wedge Breakout Confirmed' },
+              smt: { status: 'pass', text: 'Converging Descending Resistance & Support Trendlines' },
+              crtType: { id: 4, name: 'Falling Wedge Breakout' },
+              checks: [
+                { key: 'pa1', title: '1 · Converging Descending Channels', status: 'pass', text: `Res Slope: ${slopeH.toFixed(2)} < Support Slope: ${slopeL.toFixed(2)}` },
+                { key: 'pa2', title: '2 · Volatility & Range Contraction', status: 'pass', text: `Initial Range: ${initWidth.toFixed(2)} -> Apex Range: ${apexWidth.toFixed(2)}` },
+                { key: 'pa3', title: '3 · Trendline Breakout', status: 'pass', text: 'Confirmed Bullish Breakout above descending resistance' },
+                { key: 'pa4', title: '4 · Institutional Risk-to-Reward Ratio', status: rr2 >= 2.0 ? 'pass' : 'warn', text: `TP1 ${rr1.toFixed(1)}R · TP2 ${rr2.toFixed(1)}R` }
+              ],
+              grade: 'A+'
+            });
+          }
+        }
+      }
+    }
+
+    return out;
+  }
+
   /* ---------------- Public API ---------------- */
   const ACTIVE = new Set(['WAITING_SWEEP', 'WAIT_MODEL1', 'WAIT_TRIGGER', 'IN_TRADE', 'TP1_RUNNER']);
   const TRADED = new Set(['IN_TRADE', 'TP1_RUNNER', 'TP2', 'STOPPED', 'BREAKEVEN']);
@@ -754,7 +1039,12 @@
   function findAllSetups(data, opts = {}) {
     const o = { ...DEFAULTS, ...opts };
     const out = [];
-    const { htf } = data;
+    const { htf, ltf, market, pair } = data;
+
+    // Detect Price Action patterns first
+    const pa = detectPriceActionPatterns(ltf || htf, market, pair, o);
+    out.push(...pa);
+
     for (let i = 4; i < htf.length - 1; i++) {
       if (!isThick(htf[i], o.minBodyRatio)) continue;
       const s = evaluateImpulseAt(data, i, o);
@@ -767,8 +1057,13 @@
 
   function evaluateLive(data, opts = {}) {
     const o = { ...DEFAULTS, ...opts };
-    const { htf } = data;
+    const { htf, ltf, market, pair } = data;
     const setups = [];
+
+    // Priority 1: Check Price Action Patterns (Double Top/Bottom, Rising/Falling Wedge)
+    const pa = detectPriceActionPatterns(ltf || htf, market, pair, o);
+    setups.push(...pa);
+
     for (let i = htf.length - 2; i >= Math.max(4, htf.length - 2 - o.lookbackC1); i--) {
       if (!isThick(htf[i], o.minBodyRatio)) continue;
       const s = evaluateImpulseAt(data, i, o);
@@ -778,6 +1073,7 @@
     }
     const recentCutoff = htf.length - 8;
     const rank = s => {
+      if (s.patternType) return 20; // Prioritize Price Action Patterns
       const isRecent = s.c1Idx >= recentCutoff ? 10 : 0;
       const stateScore = { IN_TRADE: 6, TP1_RUNNER: 6, WAIT_TRIGGER: 5, WAIT_MODEL1: 4, WAITING_SWEEP: 3 }[s.state] || (TRADED.has(s.state) ? 2 : 1);
       return isRecent + stateScore;
@@ -787,20 +1083,20 @@
   }
 
   const STATE_INFO = {
-    C1_FORMING: { label: 'BOS Forming', tone: 'muted', step: 0 },
-    WAITING_SWEEP: { label: 'Wait IDM Sweep', tone: 'info', step: 1 },
-    WAIT_MODEL1: { label: 'In POI · Wait CHoCH', tone: 'warn', step: 2 },
-    WAIT_TRIGGER: { label: 'Adv CHoCH · Wait OB', tone: 'warn', step: 3 },
-    IN_TRADE: { label: 'SMC OB LIVE', tone: 'live', step: 4 },
-    TP1_RUNNER: { label: 'TP1 Hit · Trail X1-X3', tone: 'good', step: 5 },
-    TP2: { label: 'TP2 Target Hit', tone: 'good', step: 6 },
-    BREAKEVEN: { label: 'Trail SL / BE Exit', tone: 'good', step: 6 },
+    C1_FORMING: { label: 'Pattern Forming', tone: 'muted', step: 0 },
+    WAITING_SWEEP: { label: 'Wait Breakout', tone: 'info', step: 1 },
+    WAIT_MODEL1: { label: 'Testing Key Level', tone: 'warn', step: 2 },
+    WAIT_TRIGGER: { label: 'Awaiting Confirmation', tone: 'warn', step: 3 },
+    IN_TRADE: { label: 'PRICE ACTION LIVE', tone: 'live', step: 4 },
+    TP1_RUNNER: { label: 'TP1 Hit · Runner Trailing', tone: 'good', step: 5 },
+    TP2: { label: 'Target Hit', tone: 'good', step: 6 },
+    BREAKEVEN: { label: 'BE Lock Exit', tone: 'good', step: 6 },
     STOPPED: { label: 'Stopped Out', tone: 'bad', step: 6 },
     LOW_RR: { label: 'Skipped · Low R:R', tone: 'muted', step: 4 },
     MISSED: { label: 'Missed Entry', tone: 'muted', step: 3 },
-    INVALID: { label: 'Origin Broken', tone: 'muted', step: 2 },
-    EXPIRED: { label: 'POI Expired', tone: 'muted', step: 1 }
+    INVALID: { label: 'Pattern Invalidated', tone: 'muted', step: 2 },
+    EXPIRED: { label: 'Pattern Expired', tone: 'muted', step: 1 }
   };
 
-  window.CRTEngine = { DEFAULTS, metrics, isThick, atr, evaluateLive, findAllSetups, STATE_INFO, ACTIVE, TRADED, lowerBound };
+  window.CRTEngine = { DEFAULTS, metrics, isThick, atr, evaluateLive, findAllSetups, detectPriceActionPatterns, STATE_INFO, ACTIVE, TRADED, lowerBound };
 })();

@@ -17,7 +17,7 @@
     lastDerivMarketId: '1HZ15V',
     lastWeltradeMarketId: 'mt5:FX Vol 20',
     chartBrokerMode: 'deriv', // 'deriv' | 'weltrade' | 'all'
-    signalBrokerFilter: 'all', // 'all' | 'deriv' | 'weltrade'
+    signalBrokerFilter: 'deriv', // Deriv only mode
     pairKey: '1H_5m',
     layout: 'split',
     wlCategory: 'all',
@@ -149,18 +149,22 @@
   async function dispatchMt5Order(market, setup, activeLvls, pos, mode = 'AUTO') {
     if (!market || !setup || !activeLvls) return false;
     const isWt = isWeltradeMarket(market);
-    const brokerName = isWt ? 'WELTRADE MT5 (#43374418)' : 'DERIV MT5 (#32398784)';
+    if (isWt) {
+      if (mode === 'MANUAL') toast('<b>⛔ Deriv Only Mode Active:</b> Weltrade MT5 trades are disabled.');
+      return false;
+    }
+    const brokerName = 'DERIV MT5 (#32398784)';
     const brokerAcc  = getBrokerAccount(market);
 
-    // Strict Pure A+ Gate: Never execute regular (Grade A/B/C) setups
+    // Strict Pure A+ Gate: Only execute high confluence setups
     if (setup.grade !== 'A+') {
       if (mode === 'MANUAL') {
-        toast(`<b>⛔ BLOCKED REGULAR TRADE (${setup.grade || 'C'}):</b> Only Pure <b>A+</b> (7/7 confluence) SMC setups are permitted on ${brokerName}.`);
+        toast(`<b>⛔ BLOCKED SETUP (${setup.grade || 'C'}):</b> Only High Confluence A+ Price Action setups are permitted on ${brokerName}.`);
       }
       return false;
     }
 
-    // Institutional Portfolio & Account Risk Guard (Per-Broker Account)
+    // Institutional Portfolio & Account Risk Guard (Deriv Account)
     const riskCheck = ML.evaluatePortfolioRisk(market, pos, brokerAcc, {
       maxOpenTrades: state.maxOpenTrades,
       maxRiskPerTradePct: state.maxRiskPerTradePct,
@@ -173,23 +177,25 @@
       return false;
     }
 
-    const cmdId = `SMC-${market.id.replace(/[^a-zA-Z0-9]/g, '')}-${setup.c1.time}`;
+    const timeKey = setup.c1?.time || setup.entryIdx || Date.now();
+    const cmdId = `PA-${market.id.replace(/[^a-zA-Z0-9]/g, '')}-${timeKey}`;
     if (state.dispatchedCmdIds.has(cmdId)) return false;
     state.dispatchedCmdIds.add(cmdId);
 
     const mt5Sym = market.mt5Symbol || market.name;
-    const side = setup.isBear ? 'SELL_LIMIT' : 'BUY_LIMIT';
-    const comment = `SMC_APLUS_${setup.structType || 'BOS'}`;
+    const side = (setup.side === 'SELL' || setup.isBear) ? 'SELL_LIMIT' : 'BUY_LIMIT';
+    const effectiveSl = pos.clampedSl != null ? pos.clampedSl : activeLvls.sl;
+    const comment = setup.isPriceAction ? `PA_${setup.pattern}_${setup.side || (setup.isBear ? 'SELL' : 'BUY')}` : `SMC_APLUS_${setup.structType || 'BOS'}`;
 
     const ok = await F.mt5.sendCommand({
       id: cmdId,
-      broker: isWt ? 'weltrade' : 'deriv',
+      broker: 'deriv',
       action: 'PLACE_LIMIT',
       symbol: mt5Sym,
       side,
       lot: pos.lot,
       entry: activeLvls.entry,
-      sl: activeLvls.sl,
+      sl: effectiveSl,
       tp: activeLvls.tp2,
       ticket: 0,
       comment
@@ -198,8 +204,8 @@
     const dec = F.decimalsFor(state.series?.ltf || []);
     const f = v => v != null && isFinite(v) ? v.toFixed(dec) : '—';
     toast(
-      `<b>⚡ ${brokerName} PURE A+ ${mode} ORDER SENT: ${mt5Sym}</b>` +
-      `<div class="small muted" style="margin-top:3px;">${side} ${pos.lotFormatted} lot @ ${f(activeLvls.entry)} · SL ${f(activeLvls.sl)} (-$${pos.actualRiskUsd.toFixed(2)} / ${pos.actualRiskPct}%) · TP ${f(activeLvls.tp2)}</div>`
+      `<b>⚡ ${brokerName} PRICE ACTION ${mode} ORDER SENT: ${mt5Sym}</b>` +
+      `<div class="small muted" style="margin-top:3px;">${side} ${pos.lotFormatted} lot @ ${f(activeLvls.entry)} · SL ${f(effectiveSl)} (-$${pos.actualRiskUsd.toFixed(2)} / ${pos.actualRiskPct}%) · TP ${f(activeLvls.tp2)}</div>`
     );
     return ok;
   }
@@ -546,6 +552,21 @@
     if (!setup) return null;
     const ltf = series?.ltf || [];
 
+    if (setup.isPriceAction || setup.pattern) {
+      const risk = Math.max(Math.abs(setup.entry - setup.sl), 1e-8);
+      return {
+        label: `Price Action: ${(setup.pattern || '').replace(/_/g, ' ')} (${setup.side || (setup.isBear ? 'SELL' : 'BUY')})`,
+        entry: setup.entry,
+        sl: setup.sl,
+        tp1: setup.tp1,
+        tp2: setup.tp2,
+        risk,
+        rr1: Math.abs(setup.entry - setup.tp1) / risk,
+        rr2: Math.abs(setup.entry - setup.tp2) / risk,
+        entryIdx: setup.entryIdx ?? (ltf.length - 1)
+      };
+    }
+
     if (setup.entry == null && setup.tbsIdx != null && ltf[setup.tbsIdx]) {
       const refIdx = setup.model1Idx != null && setup.model1Idx >= 0 ? setup.model1Idx : setup.tbsIdx;
       const refC = ltf[refIdx] || ltf[setup.tbsIdx];
@@ -726,9 +747,9 @@
 
     if (!setup) return { boxes, lines, bands, markers, priceLines };
 
-    const c1 = setup.c1;
-    const originTime = setup.originCandle ? setup.originCandle.time : c1.time;
-    const endIdx = Math.min(htf.length - 1, Math.max(setup.manipIdx || setup.c1Idx, htf.length - 1));
+    const c1 = setup.c1 || { time: (htf[htf.length - 1]?.time || Date.now()) };
+    const originTime = setup.originCandle ? setup.originCandle.time : (c1.time || (htf[0]?.time || Date.now()));
+    const endIdx = Math.min(htf.length - 1, Math.max(setup.manipIdx || setup.c1Idx || 0, htf.length - 1));
     const boxTo = htf[endIdx].time + htfMs * 2;
 
     // 1. HTF Valid Order Block & Imbalance (Ch. 4)
@@ -811,8 +832,24 @@
 
     if (!setup) return { boxes, lines, bands, markers, priceLines, positionBox };
 
-    const startT = Math.max(setup.c1.time, ltf[Math.max(0, ltf.length - 120)]?.time || setup.c1.time);
+    const c1Time = setup.c1?.time || (ltf[Math.max(0, ltf.length - 60)]?.time) || Date.now();
+    const startT = Math.max(c1Time, ltf[Math.max(0, ltf.length - 120)]?.time || c1Time);
     const endT = ltf[ltf.length - 1].time + ltfMs * 6;
+
+    if (setup.coordinates) {
+      const co = setup.coordinates;
+      if (co.neck != null) {
+        lines.push({ from: startT, to: endT, price: co.neck, color: '#fbbf24', dash: true, width: 1.5, label: 'Price Action Neckline' });
+      }
+      if (co.peak1 != null && co.peak2 != null) {
+        const pHigh = Math.max(co.peak1, co.peak2);
+        lines.push({ from: startT, to: endT, price: pHigh, color: '#ef4444', width: 1.3, label: 'Double Top Resistance' });
+      }
+      if (co.trough1 != null && co.trough2 != null) {
+        const tLow = Math.min(co.trough1, co.trough2);
+        lines.push({ from: startT, to: endT, price: tLow, color: '#22c55e', width: 1.3, label: 'Double Bottom Support' });
+      }
+    }
 
     lines.push({ from: startT, to: endT, price: setup.crth, color: '#2962ff', width: 1.3, label: setup.isBear ? 'HTF Origin (SL Guard)' : 'HTF External High (TP2)' });
     lines.push({ from: startT, to: endT, price: setup.mid, color: '#f59e0b', dash: true, width: 1.2, label: '50% Equilibrium (TP1)' });
@@ -1406,6 +1443,21 @@
       }).join('');
     }
 
+    const nanoTable = document.querySelector('#nanoChallengeTable tbody');
+    if (nanoTable && proj.nanoBlueprint && Array.isArray(proj.nanoBlueprint.days)) {
+      nanoTable.innerHTML = proj.nanoBlueprint.days.map(d => `
+        <tr>
+          <td><b style="color:#38bdf8;">Day ${d.day}</b></td>
+          <td class="mono">$${d.startBalance.toFixed(2)}</td>
+          <td class="mono" style="color:#fbbf24;">-$${d.riskPerTradeUsd.toFixed(2)} cap</td>
+          <td class="mono" style="color:#22c55e; font-weight:700;">+$${d.dailyTargetUsd.toFixed(2)}</td>
+          <td class="mono" style="color:#38bdf8; font-weight:700;">$${d.endBalance.toFixed(2)}</td>
+          <td><b>${d.focusPairs}</b></td>
+          <td class="small muted">${d.tradesNeeded} · +0.50R BE+ Armor</td>
+        </tr>
+      `).join('');
+    }
+
     if (weeklySub) weeklySub.textContent = `Targeting ~${proj.weeklyR}R weekly (${proj.tradesPerWeek} A+ SMC setups/wk @ ${proj.winRatePct}% win rate)`;
     if (weeklyTable) {
       weeklyTable.innerHTML = proj.weeks.map(w => {
@@ -1430,13 +1482,14 @@
     ltfChart.setAnnotations(buildLTFAnnotations(state.series, setup));
 
     if (focusOnSetup && setup) {
-      htfChart.focusTime(setup.c1.time, 35, 18);
+      const htfFocusT = setup.c1?.time || (state.series.htf[state.series.htf.length - 1]?.time);
+      if (htfFocusT) htfChart.focusTime(htfFocusT, 35, 18);
       const ltfFocusT = setup.entryIdx != null && state.series.ltf[setup.entryIdx]
         ? state.series.ltf[setup.entryIdx].time
         : setup.tbsIdx != null && state.series.ltf[setup.tbsIdx]
           ? state.series.ltf[setup.tbsIdx].time
-          : setup.c1.time;
-      ltfChart.focusTime(ltfFocusT, 55, 25);
+          : setup.c1?.time;
+      if (ltfFocusT) ltfChart.focusTime(ltfFocusT, 55, 25);
     }
   }
 
@@ -2211,6 +2264,9 @@
       if (!r.ok) return;
       const data = await r.json();
       pairMatrixDataCache = data;
+      if (ML.syncLivePairTelemetry && Array.isArray(data.pairs)) {
+        ML.syncLivePairTelemetry(data.pairs);
+      }
 
       const badge = document.getElementById('alphaPairBadge');
       if (badge) badge.textContent = `${data.alphaCount} Alpha`;

@@ -294,32 +294,42 @@ void MarkTicketBankedTP1(ulong ticket)
 //+------------------------------------------------------------------+
 void GetAccountGrowthTier(double equity, string &outTierName, double &outBaseRiskPct, double &outMaxRiskPct, int &outMaxTrades, double &outDailyLossCapPct, double &outDailyProfitLockPct)
 {
-   if(equity < 100.0)
+   if(equity < 25.0)
    {
-      outTierName           = "TIER_1_MICRO_SEED ($10-$99)";
-      outBaseRiskPct        = 0.75;
-      outMaxRiskPct         = 1.50;
+      // $4 -> $50 in 1 Week Nano Challenge Blueprint (~+44% daily compound with 1 sniper trade at a time)
+      outTierName           = "TIER_0_NANO_CHALLENGE ($4->$50)";
+      outBaseRiskPct        = 10.00;
+      outMaxRiskPct         = 24.00;
       outMaxTrades          = 1;
-      outDailyLossCapPct    = 2.50;
-      outDailyProfitLockPct = 4.50;
+      outDailyLossCapPct    = 28.00;
+      outDailyProfitLockPct = 55.00;
+   }
+   else if(equity < 100.0)
+   {
+      outTierName           = "TIER_1_MICRO_SEED ($25-$99)";
+      outBaseRiskPct        = 3.50;
+      outMaxRiskPct         = 8.00;
+      outMaxTrades          = 2;
+      outDailyLossCapPct    = 10.00;
+      outDailyProfitLockPct = 35.00;
    }
    else if(equity < 250.0)
    {
       outTierName           = "TIER_2_MICRO_ELEVATION ($100-$249)";
-      outBaseRiskPct        = 0.85;
-      outMaxRiskPct         = 1.65;
-      outMaxTrades          = 1;
-      outDailyLossCapPct    = 2.80;
-      outDailyProfitLockPct = 5.00;
+      outBaseRiskPct        = 1.25;
+      outMaxRiskPct         = 2.50;
+      outMaxTrades          = 2;
+      outDailyLossCapPct    = 4.00;
+      outDailyProfitLockPct = 15.00;
    }
    else if(equity < 500.0)
    {
       outTierName           = "TIER_3_GROWTH_STARTER ($250-$499)";
-      outBaseRiskPct        = 0.90;
-      outMaxRiskPct         = 1.85;
+      outBaseRiskPct        = 1.00;
+      outMaxRiskPct         = 2.00;
       outMaxTrades          = 2;
-      outDailyLossCapPct    = 3.00;
-      outDailyProfitLockPct = 5.00;
+      outDailyLossCapPct    = 3.50;
+      outDailyProfitLockPct = 10.00;
    }
    else if(equity < 2500.0)
    {
@@ -328,7 +338,7 @@ void GetAccountGrowthTier(double equity, string &outTierName, double &outBaseRis
       outMaxRiskPct         = 2.20;
       outMaxTrades          = InpMaxOpenTrades;
       outDailyLossCapPct    = 3.50;
-      outDailyProfitLockPct = 5.50;
+      outDailyProfitLockPct = 6.50;
    }
    else
    {
@@ -357,16 +367,42 @@ bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBloc
       return false;
    }
 
-   // Tier 1 Micro Seed ($10 - $99): Block heavy tick-value / wide-swing indices that can blow micro margin
+   // Dynamic ML Deal History Quarantine: If symbol has >= 3 closed deals in last 14 days with < 30% win rate and net loss
+   if(HistorySelect(TimeCurrent() - 14 * 86400, TimeCurrent()))
+   {
+      int symDeals = 0, symWins = 0;
+      double symNetPnl = 0.0;
+      int totalD = HistoryDealsTotal();
+      for(int d = totalD - 1; d >= 0; d--)
+      {
+         ulong dt = HistoryDealGetTicket(d);
+         if(dt == 0) continue;
+         long entryT = HistoryDealGetInteger(dt, DEAL_ENTRY);
+         if(entryT != DEAL_ENTRY_OUT && entryT != DEAL_ENTRY_INOUT) continue;
+         if(HistoryDealGetString(dt, DEAL_SYMBOL) != sym) continue;
+         double p = HistoryDealGetDouble(dt, DEAL_PROFIT) + HistoryDealGetDouble(dt, DEAL_SWAP) + HistoryDealGetDouble(dt, DEAL_COMMISSION);
+         symDeals++;
+         symNetPnl += p;
+         if(p >= 0.0) symWins++;
+      }
+      if(symDeals >= 3 && ((double)symWins / (double)symDeals) < 0.30 && symNetPnl < -1.0)
+      {
+         outBlockReason = StringFormat("ML Live Deal Quarantine: Blocked %s (%d/%d wins, Net $%.2f in last 14d)", sym, symWins, symDeals, symNetPnl);
+         return false;
+      }
+   }
+
+   // Tier 0 & Tier 1 ($4 - $99): Block heavy tick-value / high-margin indices while allowing Nano-safe Deriv & Weltrade pairs
    if(equity < 100.0)
    {
       if(StringFind(up, "SFX VOL 80") >= 0 || StringFind(up, "SFX VOL 99") >= 0 ||
          StringFind(up, "GAINX 1200") >= 0 ||
          StringFind(up, "MAX PAINX 2000") >= 0 || StringFind(up, "MAX GAINX 2000") >= 0 ||
          StringFind(up, "BREAKX 1800") >= 0 || StringFind(up, "SWITCHX 1800") >= 0 ||
-         StringFind(up, "JUMP 100") >= 0 || StringFind(up, "BOOM 1000") >= 0 || StringFind(up, "CRASH 1000") >= 0)
+         StringFind(up, "JUMP 100") >= 0 || StringFind(up, "JUMP 75") >= 0 || StringFind(up, "JUMP 50") >= 0 ||
+         StringFind(up, "VOLATILITY 100 INDEX") >= 0 || StringFind(up, "VOLATILITY 250") >= 0 || StringFind(up, "VOLATILITY 200") >= 0)
       {
-         outBlockReason = StringFormat("Balance-Tier Shield ($%.2f < $100): Blocked heavy index %s (Only Micro-Safe symbols allowed)", equity, sym);
+         outBlockReason = StringFormat("Balance-Tier Shield ($%.2f < $100): Blocked heavy index %s (Only Nano/Micro-Safe symbols allowed)", equity, sym);
          return false;
       }
    }
@@ -388,12 +424,14 @@ bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBloc
 //+------------------------------------------------------------------+
 bool CanOpenNewTrade(const string sym, const string comment, string &outReason)
 {
-   bool isPureAPlus   = (StringFind(comment, "APLUS") >= 0 || StringFind(comment, "A+") >= 0);
-   bool isQuickScalp  = (StringFind(comment, "SCALP") >= 0);
+   bool isPatternTrade = (StringFind(comment, "PA_") >= 0 || StringFind(comment, "PATTERN") >= 0 ||
+                          StringFind(comment, "DOUBLE") >= 0 || StringFind(comment, "WEDGE") >= 0 ||
+                          StringFind(comment, "APLUS") >= 0 || StringFind(comment, "A+") >= 0);
+   bool isQuickScalp   = (StringFind(comment, "SCALP") >= 0);
 
-   if(!isPureAPlus && !isQuickScalp)
+   if(!isPatternTrade && !isQuickScalp)
    {
-      outReason = "Regular Trade Blocked (Requires Pure A+ 7/7 Confluence or Quick Scalp)";
+      outReason = "Trade Blocked (Requires Double Top/Bottom, Rising/Falling Wedge, or Quick Scalp)";
       return false;
    }
 
@@ -633,7 +671,7 @@ double CalculateRiskLot(const string sym, bool isBuy, double entryPrice, double 
    int tierMaxTrades = InpMaxOpenTrades;
    GetAccountGrowthTier(equity, tierName, tierBaseRisk, tierMaxRisk, tierMaxTrades, tierDdCap, tierProfitLock);
 
-   double effectivePct = MathMin(outAdaptivePct, tierBaseRisk * 1.35);
+   double effectivePct = (equity < 100.0) ? tierBaseRisk : MathMin(outAdaptivePct, tierBaseRisk * 1.35);
    double riskPct = MathMin(MathMax(effectivePct, 0.10), tierMaxRisk);
    double targetRiskUsd = equity * (riskPct / 100.0);
 
@@ -673,7 +711,8 @@ double CalculateRiskLot(const string sym, bool isBuy, double entryPrice, double 
    {
       double minLotLoss = lossForOneLot * volMin;
       double minLotRiskPct = (minLotLoss / equity) * 100.0;
-      if(minLotRiskPct > tierMaxRisk)
+      double nanoAllowedUsd = (equity < 25.0) ? MathMax(1.05, equity * 0.25) : ((equity < 100.0) ? MathMax(2.25, equity * 0.08) : 0.0);
+      if(minLotRiskPct > tierMaxRisk && minLotLoss > nanoAllowedUsd)
       {
          Print("SMC_Auto_Bridge [", tierName, " SHIELD] Blocked ", sym, ": Min lot (", volMin,
                ") risks $", DoubleToString(minLotLoss, 2), " (", DoubleToString(minLotRiskPct, 2),
@@ -683,6 +722,20 @@ double CalculateRiskLot(const string sym, bool isBuy, double entryPrice, double 
       snappedLots = volMin;
    }
    if(snappedLots > volMax) snappedLots = volMax;
+
+   // Hard Anti-Overleverage Cap: Never allow tight stop distances to explode lot size (e.g. 43 lots on V10)
+   if(equity < 35.0)
+   {
+      snappedLots = volMin; // Strictly 1 minimum micro-lot on $4-$35 accounts
+   }
+   else
+   {
+      double maxSafeMult = MathMax(2.0, MathMin(15.0, equity / 250.0));
+      double maxSafeLots = NormalizeDouble(MathFloor((volMin * maxSafeMult) / volStep) * volStep, 3);
+      if(maxSafeLots < volMin) maxSafeLots = volMin;
+      if(snappedLots > maxSafeLots)
+         snappedLots = maxSafeLots;
+   }
 
    int lotDigits = 2;
    if(volStep >= 1.0) lotDigits = 0;
@@ -719,6 +772,44 @@ bool ExecuteVerifiedAPlusTrade(const string cmdId, const string sym, bool isBuy,
    double rewardDist = MathAbs(tp - entry);
    if(riskDist <= 0.0 || rewardDist <= 0.0) return false;
 
+   double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+   int stopsLvl = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
+   double minStopDist = MathMax((double)stopsLvl * point, point * 10.0);
+
+   // Smart Nano Stop-Loss Clamping for $4 -> $50 Challenge Accounts (equity < $50)
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(equity <= 0.0) equity = AccountInfoDouble(ACCOUNT_BALANCE);
+   if(equity > 0.0 && equity < 50.0)
+   {
+      double volMin = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+      if(volMin <= 0.0) volMin = 0.01;
+      double minLotLoss = 0.0;
+      ENUM_ORDER_TYPE cType = isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      if(OrderCalcProfit(cType, sym, volMin, entry, sl, minLotLoss))
+         minLotLoss = MathAbs(minLotLoss);
+      double maxNanoRiskUsd = (equity < 25.0) ? MathMax(1.25, equity * 0.15) : MathMax(1.85, equity * 0.06);
+      if(minLotLoss > maxNanoRiskUsd && minLotLoss > 0.0)
+      {
+         double scale = maxNanoRiskUsd / minLotLoss;
+         double clampedDist = MathMax(riskDist * scale, minStopDist * 1.6);
+         if(clampedDist < riskDist)
+         {
+            sl = NormalizePrice(sym, isBuy ? (entry - clampedDist) : (entry + clampedDist));
+            riskDist = MathAbs(entry - sl);
+            Print("SMC_Auto_Bridge [NANO SL CLAMP] Tightened ", sym, " SL to ", sl, " to cap min-lot risk near $", DoubleToString(maxNanoRiskUsd, 2), " on $", DoubleToString(equity, 2), " account");
+         }
+         // Verify post-clamp risk; if broker minimum stop distance still forces >$1.80 risk on a $10 account (e.g. SFX Vol 60), hard-block!
+         double postClampLoss = 0.0;
+         if(OrderCalcProfit(cType, sym, volMin, entry, sl, postClampLoss))
+            postClampLoss = MathAbs(postClampLoss);
+         if(postClampLoss > maxNanoRiskUsd * 1.35)
+         {
+            Print("SMC_Auto_Bridge [$10 SHIELD] Blocked ", sym, ": Even at minimum stop distance, min lot risks $", DoubleToString(postClampLoss, 2));
+            return false;
+         }
+      }
+   }
+
    string filterReason = "";
    if(!PassIndexVolatilityAndSpreadFilter(sym, isBuy, riskDist, filterReason))
    {
@@ -744,9 +835,6 @@ bool ExecuteVerifiedAPlusTrade(const string cmdId, const string sym, bool isBuy,
 
    double ask   = SymbolInfoDouble(sym, SYMBOL_ASK);
    double bid   = SymbolInfoDouble(sym, SYMBOL_BID);
-   double point = SymbolInfoDouble(sym, SYMBOL_POINT);
-   int stopsLvl = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
-   double minStopDist = MathMax((double)stopsLvl * point, point * 10.0);
 
    bool ok = false;
    string execMode = "";
@@ -895,11 +983,16 @@ void ManageOpenPositionsAndTrailing()
 
       // ===================================================================
       // ZERO-LOSS PROFIT ARMOR: NEVER LET A WINNER CLOSE IN A LOSS
-      // Stage 1: Jump SL to Breakeven + Buffer at +0.70R (Zero-Loss Armor)
-      // Stage 2: Ratchet SL to +0.35R profit lock at +1.20R
-      // Stage 3: Ratchet SL to +0.85R profit lock at +1.70R
+      // Nano Challenge (<$50): Jumps SL to Breakeven+ at +0.50R or +$0.35
+      // Standard Accounts: Jumps SL to Breakeven+ at +0.65R
+      // Stage 2: Ratchet SL to +0.35R profit lock at +1.10R
+      // Stage 3: Ratchet SL to +0.85R profit lock at +1.65R
       // ===================================================================
-      if(currentR >= 0.70)
+      double accEq = AccountInfoDouble(ACCOUNT_EQUITY);
+      bool isNanoAcc = (accEq > 0.0 && accEq < 55.0);
+      bool triggerBeArmor = isNanoAcc ? (currentR >= 0.50 || curNetPnl >= 0.35) : (currentR >= 0.65);
+
+      if(triggerBeArmor)
       {
          double armBuffer = MathMax(point * 6.0, minDist * 0.25);
          double beArmed = isBuy ? (openP + armBuffer) : (openP - armBuffer);
@@ -915,7 +1008,7 @@ void ManageOpenPositionsAndTrailing()
          }
       }
 
-      if(currentR >= 1.20)
+      if(currentR >= (isNanoAcc ? 1.00 : 1.20))
       {
          double lock12 = isBuy ? (openP + initRisk * 0.35) : (openP - initRisk * 0.35);
          if(isBuy)
@@ -930,7 +1023,7 @@ void ManageOpenPositionsAndTrailing()
          }
       }
 
-      if(currentR >= 1.70)
+      if(currentR >= (isNanoAcc ? 1.50 : 1.70))
       {
          double lock17 = isBuy ? (openP + initRisk * 0.85) : (openP - initRisk * 0.85);
          if(isBuy)
@@ -998,165 +1091,364 @@ void ManageOpenPositionsAndTrailing()
 }
 
 //+------------------------------------------------------------------+
-//| Evaluate Pure A+ 7/7 Confluence on a Specific HTF->LTF Pair      |
+//| Price Action Pattern Detection Engine                            |
+//| Patterns: Double Top, Double Bottom, Rising Wedge, Falling Wedge |
 //+------------------------------------------------------------------+
-bool EvaluateTimeframePairPureAPlus(const string sym, ENUM_TIMEFRAMES tfH, ENUM_TIMEFRAMES tfL, const string pairTag)
+
+// 1. Double Top Pattern (Bearish Reversal / "M" Formation)
+bool DetectDoubleTop(const string sym, const MqlRates &rates[], int totalBars, double atr,
+                     double &outEntry, double &outSl, double &outTp, double &outScore, string &outTag)
 {
-   if(Bars(sym, tfH) < 80 || Bars(sym, tfL) < 120) return false;
+   if(totalBars < 40 || atr <= 0.0) return false;
+   if(IsCounterSpikeTrade(sym, false)) return false; // Sells blocked on Boom indices
 
-   MqlRates htf[], ltf[];
-   ArraySetAsSeries(htf, false);
-   ArraySetAsSeries(ltf, false);
+   int curBar = totalBars - 1;
+   double curPrice = rates[curBar].close;
 
-   int cH = CopyRates(sym, tfH, 0, 80, htf);
-   int cL = CopyRates(sym, tfL, 0, 120, ltf);
-   if(cH < 50 || cL < 60) return false;
+   // Identify recent swing highs in last 45 bars
+   int p1Idx = -1, p2Idx = -1;
+   double p1Price = -1e18, p2Price = -1e18;
 
-   double htfAtr = 0.0;
-   for(int i = cH - 15; i < cH - 1; i++)
-      htfAtr += (htf[i].high - htf[i].low);
-   htfAtr /= 14.0;
-   if(htfAtr <= 0.0) return false;
-
-   double ltfAtr = 0.0;
-   for(int i = cL - 15; i < cL - 1; i++)
-      ltfAtr += (ltf[i].high - ltf[i].low);
-   ltfAtr /= 14.0;
-   if(ltfAtr <= 0.0) ltfAtr = htfAtr * 0.25;
-
-   double curPrice = ltf[cL - 1].close;
-
-   // Scan recent HTF impulse waves (last 18 HTF bars)
-   for(int impIdx = cH - 2; impIdx >= cH - 16; impIdx--)
+   for(int i = curBar - 2; i >= MathMax(3, curBar - 45); i--)
    {
-      if(impIdx < 8) break;
-      double body = MathAbs(htf[impIdx].close - htf[impIdx].open);
-      double rng  = MathMax(htf[impIdx].high - htf[impIdx].low, 1e-8);
-      if(body / rng < 0.42) continue;
-
-      bool isBull = (htf[impIdx].close >= htf[impIdx].open);
-      int origIdx = impIdx - 1;
-      for(int k = impIdx; k >= MathMax(2, impIdx - 6); k--)
+      bool isHigh = (rates[i].high > rates[i-1].high && rates[i].high > rates[i-2].high &&
+                     rates[i].high >= rates[i+1].high && rates[i].high >= rates[i+2].high);
+      if(isHigh)
       {
-         if(isBull  && htf[k].low  <= htf[origIdx].low)  origIdx = k;
-         if(!isBull && htf[k].high >= htf[origIdx].high) origIdx = k;
-      }
-
-      double pointA = isBull ? htf[origIdx].low : htf[origIdx].high;
-      double pointB = isBull ? MathMax(htf[impIdx].high, htf[MathMin(cH - 1, impIdx + 1)].high)
-                             : MathMin(htf[impIdx].low,  htf[MathMin(cH - 1, impIdx + 1)].low);
-      double legRange = MathAbs(pointB - pointA);
-      if(legRange < htfAtr * 1.4) continue;
-
-      // 1. Check HTF BOS/CHoCH body close beyond prior structure + prior pullback sweep
-      double priorSwing = isBull ? -1e18 : 1e18;
-      bool sweptPrior = false;
-      for(int k = MathMax(1, origIdx - 8); k < origIdx; k++)
-      {
-         if(isBull  && htf[k].high > priorSwing) priorSwing = htf[k].high;
-         if(!isBull && htf[k].low  < priorSwing) priorSwing = htf[k].low;
-         if(isBull  && htf[k].low  < htf[k - 1].low)   sweptPrior = true;
-         if(!isBull && htf[k].high > htf[k - 1].high)  sweptPrior = true;
-      }
-      bool brokeBos = isBull ? (htf[impIdx].close > priorSwing) : (htf[impIdx].close < priorSwing);
-      if(!brokeBos || !sweptPrior) continue;
-
-      // 2. Check Premium (>50%) / Discount (<50%) Equilibrium
-      double eq50 = (pointA + pointB) * 0.5;
-      if(isBull  && curPrice >= eq50) continue;
-      if(!isBull && curPrice <= eq50) continue;
-      if(IsCounterSpikeTrade(sym, isBull)) continue;
-
-      // 3. Check Valid HTF Order Block (Sweep + FVG + 60% ATR Rule)
-      bool obSwept = isBull
-         ? (htf[origIdx].low <= htf[origIdx - 1].low || htf[origIdx].low <= htf[origIdx - 2].low)
-         : (htf[origIdx].high >= htf[origIdx - 1].high || htf[origIdx].high >= htf[origIdx - 2].high);
-      bool obFvg = false;
-      for(int off = 0; off <= 2 && (origIdx + off + 2) < cH; off++)
-      {
-         if(isBull  && htf[origIdx + off + 2].low  > htf[origIdx + off].high) { obFvg = true; break; }
-         if(!isBull && htf[origIdx + off + 2].high < htf[origIdx + off].low)  { obFvg = true; break; }
-      }
-      if(!obSwept || !obFvg) continue;
-
-      double obTop = htf[origIdx].high;
-      double obBot = htf[origIdx].low;
-      if((obTop - obBot) < htfAtr * 0.60)
-      {
-         double midOb = (obTop + obBot) * 0.5;
-         obTop = midOb + htfAtr * 0.50;
-         obBot = midOb - htfAtr * 0.50;
-      }
-      // Allow Discount/Premium Fib 50-79% OTE + OB confluence zone
-      double poiTop = isBull ? MathMax(obTop, pointA + legRange * 0.38) : obTop;
-      double poiBot = isBull ? obBot : MathMin(obBot, pointA - legRange * 0.38);
-
-      // 4. Check LTF POI Mitigation + Inducement Sweep + LTF Advanced CHoCH in last 14 LTF bars
-      int tapIdx = -1;
-      double poiExtreme = isBull ? 1e18 : -1e18;
-      int extremeIdx = -1;
-      int ltfPullbacks = 0;
-
-      for(int m = cL - 14; m < cL; m++)
-      {
-         if(m < 2) continue;
-         if(isBull  && ltf[m].high > ltf[m - 1].high) ltfPullbacks++;
-         if(!isBull && ltf[m].low  < ltf[m - 1].low)  ltfPullbacks++;
-
-         bool inPoi = isBull
-            ? (ltf[m].low <= poiTop && ltf[m].close >= pointA - htfAtr * 0.25)
-            : (ltf[m].high >= poiBot && ltf[m].close <= pointA + htfAtr * 0.25);
-         if(inPoi && tapIdx < 0) tapIdx = m;
-
-         if(tapIdx >= 0)
+         if(p2Idx < 0)
          {
-            if(isBull  && ltf[m].low  < poiExtreme) { poiExtreme = ltf[m].low;  extremeIdx = m; }
-            if(!isBull && ltf[m].high > poiExtreme) { poiExtreme = ltf[m].high; extremeIdx = m; }
+            p2Idx = i;
+            p2Price = rates[i].high;
+         }
+         else if(p1Idx < 0 && (p2Idx - i) >= 4)
+         {
+            p1Idx = i;
+            p1Price = rates[i].high;
+            break;
          }
       }
-      if(tapIdx < 0 || extremeIdx < 0 || ltfPullbacks < 1) continue;
+   }
 
-      // 5. Find minor LTF swing prior to extremeIdx and check if recent LTF candle closed beyond it (Adv CHoCH)
-      double minorSwing = isBull ? -1e18 : 1e18;
-      for(int m = MathMax(1, extremeIdx - 5); m <= extremeIdx; m++)
+   if(p1Idx < 0 || p2Idx < 0) return false;
+
+   // Find Neckline (lowest low between Peak 1 and Peak 2)
+   int neckIdx = p1Idx;
+   double neckPrice = 1e18;
+   for(int k = p1Idx + 1; k < p2Idx; k++)
+   {
+      if(rates[k].low < neckPrice)
       {
-         if(isBull  && ltf[m].high > minorSwing) minorSwing = ltf[m].high;
-         if(!isBull && ltf[m].low  < minorSwing) minorSwing = ltf[m].low;
-      }
-
-      bool chochRecent = false;
-      for(int m = MathMax(extremeIdx + 1, cL - 4); m < cL; m++)
-      {
-         if(isBull  && ltf[m].close > minorSwing && ltf[m].close > ltf[m].open) { chochRecent = true; break; }
-         if(!isBull && ltf[m].close < minorSwing && ltf[m].close < ltf[m].open) { chochRecent = true; break; }
-      }
-      if(!chochRecent) continue;
-
-      // 6. Compute Entry, Stop Loss, TP1 (50% EQ), TP2 (External Point B) & Verify R:R
-      double sl = isBull ? (poiExtreme - ltfAtr * 0.20) : (poiExtreme + ltfAtr * 0.20);
-      double risk = MathAbs(curPrice - sl);
-      if(risk <= ltfAtr * 0.15) risk = ltfAtr * 0.35;
-
-      double rawTp1 = eq50;
-      double rawTp2 = pointB;
-      double tp1 = (isBull ? (rawTp1 > curPrice + risk * 1.50) : (rawTp1 < curPrice - risk * 1.50))
-                   ? rawTp1
-                   : (isBull ? (curPrice + risk * 2.0) : (curPrice - risk * 2.0));
-      double tp2 = (isBull ? (rawTp2 > curPrice + risk * InpMinRR) : (rawTp2 < curPrice - risk * InpMinRR))
-                   ? rawTp2
-                   : (isBull ? (curPrice + risk * 3.2) : (curPrice - risk * 3.2));
-
-      double rr1 = MathAbs(tp1 - curPrice) / risk;
-      double rr2 = MathAbs(tp2 - curPrice) / risk;
-
-      if(rr1 >= 1.50 && rr2 >= InpMinRR)
-      {
-         string cmdId = "NATIVE_APLUS_" + pairTag + "_" + (isBull ? "BUY_" : "SELL_") + sym + "_" + IntegerToString((int)ltf[cL - 1].time);
-         string comm  = "SMC_APLUS_7of7_" + pairTag + "_" + (isBull ? "BUY" : "SELL");
-         if(ExecuteVerifiedAPlusTrade(cmdId, sym, isBull, curPrice, sl, tp2, comm))
-            return true;
+         neckPrice = rates[k].low;
+         neckIdx = k;
       }
    }
+
+   if(neckPrice >= 1e17) return false;
+
+   // Pattern Geometry & Validation Rules
+   double patternHeight = MathMax(p1Price, p2Price) - neckPrice;
+   if(patternHeight < atr * 0.90) return false;
+
+   double peakDiff = MathAbs(p1Price - p2Price);
+   if(peakDiff > atr * 0.38) return false; // Peaks roughly equal within ATR tolerance
+
+   // Invalidation check
+   if(curPrice > MathMax(p1Price, p2Price) + atr * 0.20) return false;
+
+   // Execution Triggers
+   bool isNeckBreak = (curPrice <= neckPrice + atr * 0.15 && rates[curBar].close < rates[curBar].open);
+   bool isPeakRejection = (curPrice < p2Price - atr * 0.30 && rates[curBar].close < rates[curBar].open &&
+                           (curBar - p2Idx) <= 8);
+
+   if(!isNeckBreak && !isPeakRejection) return false;
+
+   outEntry = curPrice;
+   outSl = MathMax(p1Price, p2Price) + atr * 0.25;
+   double risk = MathAbs(outSl - outEntry);
+   if(risk <= atr * 0.15) risk = atr * 0.35;
+
+   outTp = outEntry - MathMax(patternHeight * 1.25, risk * InpMinRR);
+   double rr = MathAbs(outTp - outEntry) / risk;
+   if(rr < InpMinRR - 0.05) return false;
+
+   double symmScore = MathMax(0.0, 1.0 - (peakDiff / (atr * 0.40))) * 35.0;
+   double heightScore = MathMin(1.0, patternHeight / (atr * 2.5)) * 30.0;
+   double trigScore = isNeckBreak ? 25.0 : 18.0;
+   outScore = MathMin(99.0, symmScore + heightScore + trigScore + 10.0);
+   outTag = isNeckBreak ? "DOUBLE_TOP_NECK_BREAK" : "DOUBLE_TOP_PEAK_REJECT";
+
+   return (outScore >= 70.0);
+}
+
+// 2. Double Bottom Pattern (Bullish Reversal / "W" Formation)
+bool DetectDoubleBottom(const string sym, const MqlRates &rates[], int totalBars, double atr,
+                        double &outEntry, double &outSl, double &outTp, double &outScore, string &outTag)
+{
+   if(totalBars < 40 || atr <= 0.0) return false;
+   if(IsCounterSpikeTrade(sym, true)) return false; // Buys blocked on Crash indices
+
+   int curBar = totalBars - 1;
+   double curPrice = rates[curBar].close;
+
+   // Identify recent swing lows in last 45 bars
+   int t1Idx = -1, t2Idx = -1;
+   double t1Price = 1e18, t2Price = 1e18;
+
+   for(int i = curBar - 2; i >= MathMax(3, curBar - 45); i--)
+   {
+      bool isLow = (rates[i].low < rates[i-1].low && rates[i].low < rates[i-2].low &&
+                    rates[i].low <= rates[i+1].low && rates[i].low <= rates[i+2].low);
+      if(isLow)
+      {
+         if(t2Idx < 0)
+         {
+            t2Idx = i;
+            t2Price = rates[i].low;
+         }
+         else if(t1Idx < 0 && (t2Idx - i) >= 4)
+         {
+            t1Idx = i;
+            t1Price = rates[i].low;
+            break;
+         }
+      }
+   }
+
+   if(t1Idx < 0 || t2Idx < 0) return false;
+
+   // Find Neckline (highest high between Trough 1 and Trough 2)
+   int neckIdx = t1Idx;
+   double neckPrice = -1e18;
+   for(int k = t1Idx + 1; k < t2Idx; k++)
+   {
+      if(rates[k].high > neckPrice)
+      {
+         neckPrice = rates[k].high;
+         neckIdx = k;
+      }
+   }
+
+   if(neckPrice <= -1e17) return false;
+
+   double patternHeight = neckPrice - MathMin(t1Price, t2Price);
+   if(patternHeight < atr * 0.90) return false;
+
+   double troughDiff = MathAbs(t1Price - t2Price);
+   if(troughDiff > atr * 0.38) return false;
+
+   if(curPrice < MathMin(t1Price, t2Price) - atr * 0.20) return false;
+
+   bool isNeckBreak = (curPrice >= neckPrice - atr * 0.15 && rates[curBar].close > rates[curBar].open);
+   bool isTroughRejection = (curPrice > t2Price + atr * 0.30 && rates[curBar].close > rates[curBar].open &&
+                             (curBar - t2Idx) <= 8);
+
+   if(!isNeckBreak && !isTroughRejection) return false;
+
+   outEntry = curPrice;
+   outSl = MathMin(t1Price, t2Price) - atr * 0.25;
+   double risk = MathAbs(outEntry - outSl);
+   if(risk <= atr * 0.15) risk = atr * 0.35;
+
+   outTp = outEntry + MathMax(patternHeight * 1.25, risk * InpMinRR);
+   double rr = MathAbs(outTp - outEntry) / risk;
+   if(rr < InpMinRR - 0.05) return false;
+
+   double symmScore = MathMax(0.0, 1.0 - (troughDiff / (atr * 0.40))) * 35.0;
+   double heightScore = MathMin(1.0, patternHeight / (atr * 2.5)) * 30.0;
+   double trigScore = isNeckBreak ? 25.0 : 18.0;
+   outScore = MathMin(99.0, symmScore + heightScore + trigScore + 10.0);
+   outTag = isNeckBreak ? "DOUBLE_BOTTOM_NECK_BREAK" : "DOUBLE_BOTTOM_TROUGH_REJECT";
+
+   return (outScore >= 70.0);
+}
+
+// 3. Rising Wedge Pattern (Ascending Wedge - Bearish Breakdown)
+bool DetectRisingWedge(const string sym, const MqlRates &rates[], int totalBars, double atr,
+                      double &outEntry, double &outSl, double &outTp, double &outScore, string &outTag)
+{
+   if(totalBars < 40 || atr <= 0.0) return false;
+   if(IsCounterSpikeTrade(sym, false)) return false;
+
+   int curBar = totalBars - 1;
+   double curPrice = rates[curBar].close;
+
+   int h1 = -1, h2 = -1, l1 = -1, l2 = -1;
+   double hp1 = 0, hp2 = 0, lp1 = 0, lp2 = 0;
+
+   for(int i = curBar - 2; i >= MathMax(2, curBar - 35); i--)
+   {
+      if(rates[i].high > rates[i-1].high && rates[i].high >= rates[i+1].high)
+      {
+         if(h2 < 0) { h2 = i; hp2 = rates[i].high; }
+         else if(h1 < 0 && (h2 - i) >= 4) { h1 = i; hp1 = rates[i].high; }
+      }
+      if(rates[i].low < rates[i-1].low && rates[i].low <= rates[i+1].low)
+      {
+         if(l2 < 0) { l2 = i; lp2 = rates[i].low; }
+         else if(l1 < 0 && (l2 - i) >= 4) { l1 = i; lp1 = rates[i].low; }
+      }
+      if(h1 >= 0 && h2 >= 0 && l1 >= 0 && l2 >= 0) break;
+   }
+
+   if(h1 < 0 || h2 < 0 || l1 < 0 || l2 < 0) return false;
+
+   // Higher Highs & Higher Lows
+   if(hp2 <= hp1 || lp2 <= lp1) return false;
+
+   double slopeH = (hp2 - hp1) / (double)(h2 - h1);
+   double slopeL = (lp2 - lp1) / (double)(l2 - l1);
+
+   // Convergence: Support line rises steeper than resistance line
+   if(slopeL <= slopeH || slopeL <= 0.0 || slopeH <= 0.0) return false;
+
+   double initWidth = MathAbs(hp1 - lp1);
+   double apexWidth = MathAbs(hp2 - lp2);
+   if(initWidth < atr * 0.90 || apexWidth >= initWidth * 0.90) return false;
+
+   // Breakdown Trigger: Current price breaks below support line
+   double supAtNow = lp1 + slopeL * (double)(curBar - l1);
+   if(curPrice >= supAtNow + atr * 0.05) return false;
+   if(rates[curBar].close >= rates[curBar].open) return false;
+
+   outEntry = curPrice;
+   outSl = hp2 + atr * 0.25;
+   double risk = MathAbs(outSl - outEntry);
+   if(risk <= atr * 0.15) risk = atr * 0.35;
+
+   outTp = outEntry - MathMax(initWidth * 1.2, risk * InpMinRR);
+   double rr = MathAbs(outTp - outEntry) / risk;
+   if(rr < InpMinRR - 0.05) return false;
+
+   double convScore = MathMin(1.0, (slopeL - slopeH) / slopeL) * 35.0;
+   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 35.0;
+   outScore = MathMin(99.0, convScore + contractScore + 25.0);
+   outTag = "RISING_WEDGE_BREAKDOWN";
+
+   return (outScore >= 70.0);
+}
+
+// 4. Falling Wedge Pattern (Descending Wedge - Bullish Breakout)
+bool DetectFallingWedge(const string sym, const MqlRates &rates[], int totalBars, double atr,
+                       double &outEntry, double &outSl, double &outTp, double &outScore, string &outTag)
+{
+   if(totalBars < 40 || atr <= 0.0) return false;
+   if(IsCounterSpikeTrade(sym, true)) return false;
+
+   int curBar = totalBars - 1;
+   double curPrice = rates[curBar].close;
+
+   int h1 = -1, h2 = -1, l1 = -1, l2 = -1;
+   double hp1 = 0, hp2 = 0, lp1 = 0, lp2 = 0;
+
+   for(int i = curBar - 2; i >= MathMax(2, curBar - 35); i--)
+   {
+      if(rates[i].high > rates[i-1].high && rates[i].high >= rates[i+1].high)
+      {
+         if(h2 < 0) { h2 = i; hp2 = rates[i].high; }
+         else if(h1 < 0 && (h2 - i) >= 4) { h1 = i; hp1 = rates[i].high; }
+      }
+      if(rates[i].low < rates[i-1].low && rates[i].low <= rates[i+1].low)
+      {
+         if(l2 < 0) { l2 = i; lp2 = rates[i].low; }
+         else if(l1 < 0 && (l2 - i) >= 4) { l1 = i; lp1 = rates[i].low; }
+      }
+      if(h1 >= 0 && h2 >= 0 && l1 >= 0 && l2 >= 0) break;
+   }
+
+   if(h1 < 0 || h2 < 0 || l1 < 0 || l2 < 0) return false;
+
+   // Lower Highs & Lower Lows
+   if(hp2 >= hp1 || lp2 >= lp1) return false;
+
+   double slopeH = (hp2 - hp1) / (double)(h2 - h1);
+   double slopeL = (lp2 - lp1) / (double)(l2 - l1);
+
+   // Convergence: Resistance falls steeper than support (slopeH < slopeL < 0)
+   if(slopeH >= slopeL || slopeH >= 0.0 || slopeL >= 0.0) return false;
+
+   double initWidth = MathAbs(hp1 - lp1);
+   double apexWidth = MathAbs(hp2 - lp2);
+   if(initWidth < atr * 0.90 || apexWidth >= initWidth * 0.90) return false;
+
+   // Breakout Trigger: Current price breaks above resistance line
+   double resAtNow = hp1 + slopeH * (double)(curBar - h1);
+   if(curPrice <= resAtNow - atr * 0.05) return false;
+   if(rates[curBar].close <= rates[curBar].open) return false;
+
+   outEntry = curPrice;
+   outSl = lp2 - atr * 0.25;
+   double risk = MathAbs(outEntry - outSl);
+   if(risk <= atr * 0.15) risk = atr * 0.35;
+
+   outTp = outEntry + MathMax(initWidth * 1.2, risk * InpMinRR);
+   double rr = MathAbs(outTp - outEntry) / risk;
+   if(rr < InpMinRR - 0.05) return false;
+
+   double convScore = MathMin(1.0, (slopeL - slopeH) / MathAbs(slopeH)) * 35.0;
+   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 35.0;
+   outScore = MathMin(99.0, convScore + contractScore + 25.0);
+   outTag = "FALLING_WEDGE_BREAKOUT";
+
+   return (outScore >= 70.0);
+}
+
+//+------------------------------------------------------------------+
+//| Multi-Timeframe Price Action Pattern Scanner                     |
+//+------------------------------------------------------------------+
+bool EvaluateTimeframePriceAction(const string sym, ENUM_TIMEFRAMES tf, const string tfTag)
+{
+   if(Bars(sym, tf) < 55) return false;
+
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false);
+   int c = CopyRates(sym, tf, 0, 80, rates);
+   if(c < 45) return false;
+
+   double atr = 0.0;
+   for(int i = c - 15; i < c - 1; i++)
+      atr += (rates[i].high - rates[i].low);
+   atr /= 14.0;
+   if(atr <= 0.0) return false;
+
+   double entry = 0, sl = 0, tp = 0, score = 0;
+   string tag = "";
+
+   // 1. Detect Double Top (M-Pattern)
+   if(DetectDoubleTop(sym, rates, c, atr, entry, sl, tp, score, tag))
+   {
+      string cmdId = "PA_DT_" + tfTag + "_" + sym + "_" + IntegerToString((int)rates[c - 1].time);
+      string comm  = "PA_DOUBLE_TOP_" + tfTag + "_SCORE" + IntegerToString((int)score);
+      if(ExecuteVerifiedAPlusTrade(cmdId, sym, false, entry, sl, tp, comm))
+         return true;
+   }
+
+   // 2. Detect Double Bottom (W-Pattern)
+   if(DetectDoubleBottom(sym, rates, c, atr, entry, sl, tp, score, tag))
+   {
+      string cmdId = "PA_DB_" + tfTag + "_" + sym + "_" + IntegerToString((int)rates[c - 1].time);
+      string comm  = "PA_DOUBLE_BOTTOM_" + tfTag + "_SCORE" + IntegerToString((int)score);
+      if(ExecuteVerifiedAPlusTrade(cmdId, sym, true, entry, sl, tp, comm))
+         return true;
+   }
+
+   // 3. Detect Rising Wedge (Bearish Breakdown)
+   if(DetectRisingWedge(sym, rates, c, atr, entry, sl, tp, score, tag))
+   {
+      string cmdId = "PA_RW_" + tfTag + "_" + sym + "_" + IntegerToString((int)rates[c - 1].time);
+      string comm  = "PA_RISING_WEDGE_" + tfTag + "_SCORE" + IntegerToString((int)score);
+      if(ExecuteVerifiedAPlusTrade(cmdId, sym, false, entry, sl, tp, comm))
+         return true;
+   }
+
+   // 4. Detect Falling Wedge (Bullish Breakout)
+   if(DetectFallingWedge(sym, rates, c, atr, entry, sl, tp, score, tag))
+   {
+      string cmdId = "PA_FW_" + tfTag + "_" + sym + "_" + IntegerToString((int)rates[c - 1].time);
+      string comm  = "PA_FALLING_WEDGE_" + tfTag + "_SCORE" + IntegerToString((int)score);
+      if(ExecuteVerifiedAPlusTrade(cmdId, sym, true, entry, sl, tp, comm))
+         return true;
+   }
+
    return false;
 }
 
@@ -1164,13 +1456,14 @@ void EvaluateSymbolPureAPlus(const string sym)
 {
    if(!InpEnableAutoExe || !InpNativeAPlusScan) return;
    string reason = "";
-   if(!CanOpenNewTrade(sym, "SMC_APLUS_NATIVE", reason)) return;
+   if(!CanOpenNewTrade(sym, "PA_PATTERN", reason)) return;
 
-   // Primary Author Timeframe Pair: H1 -> M5 (Ch. 6, 7 & 9)
-   if(EvaluateTimeframePairPureAPlus(sym, PERIOD_H1, PERIOD_M5, "H1_M5"))
+   // Priority 1: M5 Intraday sniper patterns
+   if(EvaluateTimeframePriceAction(sym, PERIOD_M5, "M5"))
       return;
-   // Fast Intraday Sniper Pair: M15 -> M1 (Ch. 7 & 8)
-   EvaluateTimeframePairPureAPlus(sym, PERIOD_M15, PERIOD_M1, "M15_M1");
+
+   // Priority 2: M15 Structural patterns
+   EvaluateTimeframePriceAction(sym, PERIOD_M15, "M15");
 }
 
 //+------------------------------------------------------------------+
@@ -1516,9 +1809,35 @@ void ProcessQueueFile(const string cmdPath)
             ConfigureSymbolFilling(sym);
             double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
             double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+            if(ask <= 0.0 || bid <= 0.0)
+            {
+               MqlTick tick;
+               if(SymbolInfoTick(sym, tick))
+               {
+                  ask = tick.ask;
+                  bid = tick.bid;
+               }
+            }
+            if(ask <= 0.0 || bid <= 0.0)
+            {
+               sym = _Symbol;
+               ConfigureSymbolFilling(sym);
+               ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+               bid = SymbolInfoDouble(sym, SYMBOL_BID);
+            }
             double point = SymbolInfoDouble(sym, SYMBOL_POINT);
             int stopsLvl = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
-            double minStopDist = MathMax((double)stopsLvl * point, point * 10.0);
+            double spreadDist = MathMax(ask - bid, point * 10.0);
+            double minStopDist = MathMax((double)stopsLvl * point, spreadDist * 2.0);
+            double atrDist = 0.0;
+            MqlRates atrRates[];
+            int cAtr = CopyRates(sym, PERIOD_M5, 0, 14, atrRates);
+            if(cAtr > 0)
+            {
+               for(int a = 0; a < cAtr; a++) atrDist += (atrRates[a].high - atrRates[a].low);
+               atrDist /= (double)cAtr;
+            }
+            double safeSlDist = MathMax(minStopDist * 2.5, (atrDist > 0.0 ? atrDist * 1.2 : spreadDist * 5.0));
 
             double volMin  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
             double volMax  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
@@ -1534,21 +1853,25 @@ void ProcessQueueFile(const string cmdPath)
             double mktTp = tp;
             if(isBuy)
             {
-               if(mktSl <= 0.0 || mktSl >= ask - minStopDist)
-                  mktSl = NormalizePrice(sym, ask - MathMax(point * 50.0, minStopDist * 1.5));
+               if(mktSl <= 0.0 || mktSl >= bid - minStopDist)
+                  mktSl = NormalizePrice(sym, bid - safeSlDist);
                if(mktTp <= 0.0 || mktTp <= ask + minStopDist)
-                  mktTp = NormalizePrice(sym, ask + MathMax(point * 100.0, minStopDist * 3.0));
+                  mktTp = NormalizePrice(sym, ask + safeSlDist * 2.5);
                bool ok = g_trade.Buy(lots, sym, 0.0, mktSl, mktTp, comment);
+               if(!ok)
+                  ok = g_trade.Buy(lots, sym, 0.0, 0.0, 0.0, comment);
                Print("SMC_Auto_Bridge [", cmdId, "] QUICK SCALP BUY MARKET ", sym, " Lot=", lots,
                      " SL=", mktSl, " TP=", mktTp, " -> ", (ok ? "EXECUTED" : "FAILED (" + IntegerToString(GetLastError()) + ")"));
             }
             else
             {
-               if(mktSl <= 0.0 || mktSl <= bid + minStopDist)
-                  mktSl = NormalizePrice(sym, bid + MathMax(point * 50.0, minStopDist * 1.5));
+               if(mktSl <= 0.0 || mktSl <= ask + minStopDist)
+                  mktSl = NormalizePrice(sym, ask + safeSlDist);
                if(mktTp <= 0.0 || mktTp >= bid - minStopDist)
-                  mktTp = NormalizePrice(sym, bid - MathMax(point * 100.0, minStopDist * 3.0));
+                  mktTp = NormalizePrice(sym, bid - safeSlDist * 2.5);
                bool ok = g_trade.Sell(lots, sym, 0.0, mktSl, mktTp, comment);
+               if(!ok)
+                  ok = g_trade.Sell(lots, sym, 0.0, 0.0, 0.0, comment);
                Print("SMC_Auto_Bridge [", cmdId, "] QUICK SCALP SELL MARKET ", sym, " Lot=", lots,
                      " SL=", mktSl, " TP=", mktTp, " -> ", (ok ? "EXECUTED" : "FAILED (" + IntegerToString(GetLastError()) + ")"));
             }
@@ -1629,12 +1952,18 @@ void OnTimer()
    if(g_brokerSymCount <= 0)
       InitBrokerSymbols();
 
-   // 2. Priority 1-second sync for the symbol currently viewed in the browser (and chart symbol)
+   // 2. Priority 1-second sync & ML Pure A+ scan for the symbol currently viewed in the browser (and chart symbol)
    string activeSym = GetActivePrioritySymbol();
    if(StringLen(activeSym) > 0)
+   {
       ExportSymbolTimeframes(activeSym, true);
+      EvaluateSymbolPureAPlus(activeSym);
+   }
    if(_Symbol != activeSym)
+   {
       ExportSymbolTimeframes(_Symbol, false);
+      EvaluateSymbolPureAPlus(_Symbol);
+   }
 
    // 3. Non-blocking round-robin sync for 4 symbols per second across the broker watchlist
    int batchSize = 4;
@@ -1654,8 +1983,8 @@ void OnTimer()
    if(TimeCurrent() - g_lastLog > 30)
    {
       g_lastLog = TimeCurrent();
-      Print("SMC_Auto_Bridge v4.20 [1s LIVE]: ActiveSym='", activeSym, "' | Watchlist=", g_brokerSymCount,
-            " | Account #", AccountInfoInteger(ACCOUNT_LOGIN));
+      Print("PA_Pattern_Bridge v5.00 [PRICE ACTION 1s LIVE]: ActiveSym='", activeSym, "' | Watchlist=", g_brokerSymCount,
+            " | Patterns: Double Tops/Bottoms, Wedges | Account #", AccountInfoInteger(ACCOUNT_LOGIN));
    }
 }
 //+------------------------------------------------------------------+

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SMC Desk — Frank Miller Smart Money Concepts Auto-Trading Terminal (Deriv &amp; Weltrade MT5)</title>
+  <title>Price Action Auto-Desk — Double Tops, Double Bottoms, Rising &amp; Falling Wedges (Deriv MT5)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -14,10 +14,10 @@
   <!-- ============ TOP BAR ============ -->
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark" style="background:linear-gradient(135deg,#2962ff,#089981); border-color:#38bdf8;">SMC</div>
+      <div class="brand-mark" style="background:linear-gradient(135deg,#089981,#2563eb); border-color:#38bdf8;">PA</div>
       <div>
-        <div class="brand-name">SMC Auto-Desk</div>
-        <div class="brand-sub">Frank Miller Smart Money · Deriv &amp; Weltrade MT5</div>
+        <div class="brand-name">Price Action Auto-Desk</div>
+        <div class="brand-sub">Double Tops/Bottoms · Wedges · Deriv MT5 (#32398784)</div>
       </div>
     </div>
 
@@ -46,28 +46,27 @@
     </div>
 
     <div class="feeds" id="feedStatus">
-      <span class="feed live" data-feed="deriv"><i></i>Deriv MT5 (#32398784)</span>
-      <span class="feed live" data-feed="mt5"><i></i>Weltrade MT5 (#43374418)</span>
+      <span class="feed live" data-feed="deriv"><i></i>Deriv MT5 Active (#32398784)</span>
+      <span class="feed" data-feed="mt5" style="opacity:0.6;"><i></i>Deriv Only Mode</span>
     </div>
 
     <div class="top-actions">
-      <!-- 1-Click Quick Scalp Master Controller -->
+      <!-- 1-Click Quick Scalp Controller for Deriv -->
       <div style="display:flex; gap:4px; align-items:center; background:rgba(0,0,0,0.4); padding:3px 6px; border-radius:6px; border:1px solid rgba(255,255,255,0.12);">
-        <button class="btn primary small" id="quickScalpBothBtn" style="background:linear-gradient(135deg, #2563eb, #059669); font-weight:700; padding:4px 9px;" title="Instantly fire 1M quick scalp on both Deriv &amp; Weltrade (Closes immediately when in green profit)">⚡ Quick Scalp (Both)</button>
-        <button class="btn ghost small" id="quickScalpDerivBtn" style="padding:4px 7px; color:#38bdf8; border-color:#38bdf8;" title="Fire 1M quick scalp on Deriv only">⚡ Deriv</button>
-        <button class="btn ghost small" id="quickScalpWeltradeBtn" style="padding:4px 7px; color:#22c55e; border-color:#22c55e;" title="Fire 1M quick scalp on Weltrade only">🔥 Weltrade</button>
+        <button class="btn primary small" id="quickScalpDerivBtn" style="background:linear-gradient(135deg, #2563eb, #059669); font-weight:700; padding:4px 9px;" title="Instantly fire 1M sniper scalp on Deriv (Closes immediately when in green profit)">⚡ Deriv Scalp</button>
+        <button class="btn ghost small" id="quickScalpBothBtn" style="padding:4px 7px; color:#38bdf8; border-color:#38bdf8;" title="Fire 1M quick scalp on Deriv">🔥 Auto 1M</button>
         <label class="tog small" style="margin:0 4px; font-size:11px;" title="Continuous 1M Scalper loop: auto-snipes and auto-banks green profit until daily targets are met">
           <input type="checkbox" id="togQuickScalpLoop" /> Loop
         </label>
       </div>
 
-      <label class="tog" style="background:rgba(8,153,129,0.14); border:1px solid #089981; padding:4px 8px; border-radius:4px; color:#26a69a; font-weight:700;" title="Automatically execute Pure A+ Limit Orders, SL, TP, and X1/X2/X3 trailing stops on Deriv (#32398784) &amp; Weltrade (#43374418)">
-        <input type="checkbox" id="togAutoTrade" checked /> ⚡ Pure A+ Auto-Trade (Deriv &amp; Weltrade)
+      <label class="tog" style="background:rgba(8,153,129,0.14); border:1px solid #089981; padding:4px 8px; border-radius:4px; color:#26a69a; font-weight:700;" title="Automatically execute Double Tops, Double Bottoms, Rising &amp; Falling Wedges on Deriv (#32398784)">
+        <input type="checkbox" id="togAutoTrade" checked /> ⚡ Price Action Auto-Trade (Deriv)
       </label>
       <button class="icon-btn" id="alertBtn" title="Audio &amp; desktop alerts">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
       </button>
-      <button class="icon-btn" id="settingsBtn" title="SMC Execution &amp; MT5 Risk Parameters">
+      <button class="icon-btn" id="settingsBtn" title="Price Action Pattern &amp; MT5 Risk Parameters">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
     </div>
@@ -75,12 +74,10 @@
 
   <nav class="viewtabs">
     <button class="vt active" data-view="deriv-charts">📈 Deriv Charts (#32398784)</button>
-    <button class="vt" data-view="weltrade-charts">📊 Weltrade Charts (#43374418)</button>
-    <button class="vt" data-view="deriv-signals">⚡ Deriv Signals <span class="sig-count" id="derivSigCount">0</span></button>
-    <button class="vt" data-view="weltrade-signals">🔥 Weltrade Signals <span class="sig-count" id="weltradeSigCount">0</span></button>
-    <button class="vt" data-view="scalper">🎯 Weltrade $50 Scalper <span class="sig-count" id="scalpDailyBadge" style="background:#089981;">$0.00</span></button>
+    <button class="vt" data-view="deriv-signals">⚡ Price Action Signals <span class="sig-count" id="derivSigCount">0</span></button>
+    <button class="vt" data-view="scalper">🎯 $10->$100 Challenge <span class="sig-count" id="scalpDailyBadge" style="background:#089981;">$0.00</span></button>
     <button class="vt" data-view="learning">🧠 Pair Edge Matrix <span class="sig-count" id="alphaPairBadge">8 Alpha</span></button>
-    <button class="vt" data-view="clients">👥 Client Accounts &amp; Copier <span class="sig-count" id="clientCountBadge">2</span></button>
+    <button class="vt" data-view="clients">👥 Client Accounts &amp; Copier <span class="sig-count" id="clientCountBadge">1</span></button>
     <button class="vt" data-view="backtest">Backtester</button>
     <button class="vt" data-view="journal">Trade Journal</button>
     <button class="vt" data-view="playbook">Book Rules &amp; MT5 Setup</button>
@@ -116,43 +113,43 @@
 
     <section class="center" id="chartCenterSection">
       <div class="chart-toolbar">
-        <div class="seg small" id="chartModeSeg" title="Switch between SMC Strategy Desk and Live Broker Chart">
-          <button data-mode="crt" class="active">SMC Markings (HTF + LTF)</button>
-          <button data-mode="tri">Broker + SMC</button>
+        <div class="seg small" id="chartModeSeg" title="Switch between Price Action Pattern Desk and Live Broker Chart">
+          <button data-mode="crt" class="active">Price Action Patterns (M5 + M15)</button>
+          <button data-mode="tri">Broker + Patterns</button>
           <button data-mode="broker">Live Broker Only</button>
         </div>
         <div class="seg small" id="layoutSeg">
-          <button data-layout="split" class="active" title="Dual Pane: HTF Structure + LTF Execution">HTF + LTF</button>
-          <button data-layout="ltf" title="Full LTF Execution &amp; OB Markings">LTF Full</button>
-          <button data-layout="htf" title="Full HTF BOS &amp; Premium/Discount Markings">HTF Full</button>
-          <button data-layout="tri" title="Tri-View: Live Broker Chart + HTF + LTF">Tri-View</button>
+          <button data-layout="split" class="active" title="Dual Pane: Macro Structure + Micro Pattern Execution">M15 + M5</button>
+          <button data-layout="ltf" title="Full M5 Pattern Execution">M5 Full</button>
+          <button data-layout="htf" title="Full Macro Swings">M15 Full</button>
+          <button data-layout="tri" title="Tri-View: Live Broker Chart + M15 + M5">Tri-View</button>
           <button data-layout="broker" title="Official Live Broker Chart Full">Broker Full</button>
         </div>
         <label class="tog"><input type="checkbox" id="togPositionBox" checked /> Position Tool</label>
-        <label class="tog"><input type="checkbox" id="togSessions" checked /> Sessions</label>
-        <label class="tog"><input type="checkbox" id="togOte" checked /> Fib 50–79%</label>
-        <label class="tog"><input type="checkbox" id="togKl" checked /> OB / FVG / IDM</label>
+        <label class="tog"><input type="checkbox" id="togSessions" checked /> Double Tops/Bottoms</label>
+        <label class="tog"><input type="checkbox" id="togOte" checked /> Wedges</label>
+        <label class="tog"><input type="checkbox" id="togKl" checked /> Necklines &amp; Trailing</label>
         <label class="tog" title="Toggle Live Broker Chart"><input type="checkbox" id="togBrokerChart" /> Broker Web</label>
         <div class="tb-spacer"></div>
-        <button class="btn ghost small" id="zoomInBtn" title="Zoom In on SMC Setup &amp; Drawings">🔍+ Zoom In</button>
+        <button class="btn ghost small" id="zoomInBtn" title="Zoom In on Pattern &amp; Drawings">🔍+ Zoom In</button>
         <button class="btn ghost small" id="zoomOutBtn" title="Zoom Out on Chart">🔍− Zoom Out</button>
-        <button class="btn primary small" id="fullScreenChartBtn" title="Full Screen Zoom Charts &amp; SMC Drawings (ESC to exit)">⛶ Full Screen Zoom</button>
+        <button class="btn primary small" id="fullScreenChartBtn" title="Full Screen Zoom Charts &amp; Pattern Drawings (ESC to exit)">⛶ Full Screen Zoom</button>
         <button class="btn ghost small" id="liveEdgeBtn" title="Snap charts to live current market candle">Live Price</button>
-        <button class="btn ghost small" id="jumpBtn" title="Center &amp; Zoom on selected SMC setup">Focus Setup</button>
+        <button class="btn ghost small" id="jumpBtn" title="Center &amp; Zoom on selected Price Action setup">Focus Setup</button>
         <button class="btn ghost small" id="reloadBtn" title="Refresh candle history">Refresh</button>
       </div>
 
       <div class="charts" id="charts" data-layout="split" data-mode="crt">
         <div class="chart-card" id="htfCard">
           <div class="chart-head">
-            <span class="tf-pill" id="htfPill">H1</span>
-            <span class="chart-title">HTF Structure · BOS / CHoCH · Premium / Discount &amp; POI</span>
-            <span class="chart-timer mono" id="htfTimer" title="Time remaining until HTF candle closes">--:--</span>
+            <span class="tf-pill" id="htfPill">M15</span>
+            <span class="chart-title">Macro Swings · Double Tops/Bottoms · Multi-Bar Wedges</span>
+            <span class="chart-timer mono" id="htfTimer" title="Time remaining until candle closes">--:--</span>
             <span class="chart-sub" id="htfSub"></span>
             <div style="margin-left:auto; display:flex; gap:4px;">
-              <button class="btn ghost small" id="htfZoomInBtn" style="padding:1px 6px;" title="Zoom In HTF">+</button>
-              <button class="btn ghost small" id="htfZoomOutBtn" style="padding:1px 6px;" title="Zoom Out HTF">−</button>
-              <button class="btn ghost small" id="htfFullBtn" style="padding:1px 7px;" title="Full-Screen Zoom HTF Structure &amp; Order Blocks">⛶ Full HTF</button>
+              <button class="btn ghost small" id="htfZoomInBtn" style="padding:1px 6px;" title="Zoom In">+</button>
+              <button class="btn ghost small" id="htfZoomOutBtn" style="padding:1px 6px;" title="Zoom Out">−</button>
+              <button class="btn ghost small" id="htfFullBtn" style="padding:1px 7px;" title="Full-Screen Zoom">⛶ Full</button>
             </div>
           </div>
           <div class="chart-host" id="htfChart"></div>
@@ -160,7 +157,7 @@
         <div class="chart-card" id="ltfCard">
           <div class="chart-head">
             <span class="tf-pill ltf" id="ltfPill">M5</span>
-            <span class="chart-title">LTF Execution · IDM Sweep · Adv CHoCH · OB Limit &amp; X1–X3 Trail</span>
+            <span class="chart-title">Price Action Execution · Neckline Breakouts · Wedge Breakdowns · Measured Target Projections</span>
             <span class="chart-timer mono" id="ltfTimer" title="Time remaining until LTF candle closes">--:--</span>
             <span class="chart-sub" id="ltfSub"></span>
             <div style="margin-left:auto; display:flex; gap:4px;">
@@ -422,9 +419,36 @@
         </div>
       </div>
 
+      <!-- $4 -> $50 IN 1 WEEK DERIV NANO-COMPOUNDING BLUEPRINT -->
+      <div class="card" style="margin-top:10px; border-left:3px solid #38bdf8;">
+        <div class="card-head">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-weight:700; color:#38bdf8;">🚀 $4.00 → $50.00+ Under 1 Week — Deriv Pure A+ &amp; ML Nano-Compounding Blueprint</span>
+            <span class="st-pill st-live">TIER 0 NANO SHIELD ACTIVE</span>
+          </div>
+          <span class="muted small" id="nanoChallengeSub">ML Confidence &ge; 78% · Zero-Loss Profit Armor (+0.50R BE+) · Auto SL Clamp</span>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl" id="nanoChallengeTable">
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Start Equity</th>
+                <th>Max Risk / Trade (SL Clamped)</th>
+                <th>Daily Profit Target (+43.5%)</th>
+                <th>Projected End Balance</th>
+                <th>Recommended Micro-Safe Deriv Pairs</th>
+                <th>Execution Rule</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="card" style="margin-top:10px;">
         <div class="card-head">
-          <span>$40 Account — 8-Week SMC Compounding Projection</span>
+          <span>8-Week Institutional SMC Compounding Projection</span>
           <span class="muted small" id="weeklyCompoundingSub"></span>
         </div>
         <div class="table-wrap">
@@ -535,14 +559,15 @@
           <label class="field">
             <span>Capital Protection Mode</span>
             <select id="clRiskMode">
+              <option value="NANO_CHALLENGE">Nano Challenge ($4→$50 in 1 Wk · SL Clamped · 1 Trade Max)</option>
               <option value="BALANCE_TIERED">Balance-Tiered Shield (Auto-block heavy min-lots)</option>
-              <option value="MICRO_SEED">Micro Seed ($10–$99 · 0.75% Risk · 1 Trade Max)</option>
-              <option value="GROWTH_STARTER">Growth Starter ($100–$499 · 0.90% Risk · 2 Trades)</option>
+              <option value="MICRO_SEED">Micro Seed ($25–$99 · 3.5% Risk · 2 Trades Max)</option>
+              <option value="GROWTH_STARTER">Growth Starter ($100–$499 · 1.00% Risk · 2 Trades)</option>
               <option value="PRO_COMPOUNDER">Pro Compounder ($500+ · 1.00%–1.35% Risk)</option>
             </select>
           </label>
           <div style="background:var(--bg-0); padding:8px; border-radius:4px; font-size:11px; line-height:1.4; color:var(--text-dim); border:1px solid var(--border);">
-            🛡 <b>Micro-Capital Shield Active:</b> Small accounts ($10–$100) are protected by automatically blocking wide-stop indices and strictly executing micro-safe symbols with max 1.5% risk cap.
+            🛡 <b>Nano &amp; Micro-Capital Shield Active:</b> $4–$25 Deriv Challenge accounts automatically clamp Stop Loss distance on min-lots, lock Breakeven+ at +0.50R, and filter for &ge;78% ML Pure A+ setups to compound $4 → $50 in 7 days.
           </div>
           <button class="btn primary block" type="submit" style="margin-top:4px;">
             ⚡ Connect Account to SMC Auto-Copier
@@ -566,12 +591,18 @@
             <span style="font-weight:700; color:#38bdf8; font-size:12.5px;">Institutional Account-Raising &amp; Capital Protection Matrix</span>
             <span class="small muted">Rules enforced per account balance</span>
           </div>
-          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:8px;">
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(195px, 1fr)); gap:8px;">
+            <div style="background:var(--bg-0); padding:8px 10px; border-radius:4px; border-left:3px solid #22c55e;">
+              <div style="font-weight:700; color:#22c55e; font-size:11.5px;">Tier 0: Nano Challenge ($4–$24)</div>
+              <div class="small muted" style="margin-top:3px;">Goal: <b>$4 → $50 in 7d</b> · Max Trades: <b>1</b></div>
+              <div class="small muted">Armor: <b>+0.50R BE+</b> · SL Clamped &le; $0.85</div>
+              <div class="small" style="color:#22c55e; margin-top:3px;">Allowed: V10(1s), V15(1s), V25, V75(0.001), Boom/Crash 500 &amp; 1000</div>
+            </div>
             <div style="background:var(--bg-0); padding:8px 10px; border-radius:4px; border-left:3px solid #38bdf8;">
-              <div style="font-weight:700; color:#38bdf8; font-size:11.5px;">Tier 1: Micro Seed ($10–$99)</div>
-              <div class="small muted" style="margin-top:3px;">Risk: <b>0.75% (Cap 1.5%)</b> · Max Trades: <b>1</b></div>
-              <div class="small muted">Daily Goal: <b>+4.5% Lock</b> · DD Breaker: <b>-2.5%</b></div>
-              <div class="small" style="color:#26a69a; margin-top:3px;">Allowed: Micro-safe symbols only (V10, V25, FX Vol, FlipX, Step)</div>
+              <div style="font-weight:700; color:#38bdf8; font-size:11.5px;">Tier 1: Micro Seed ($25–$99)</div>
+              <div class="small muted" style="margin-top:3px;">Risk: <b>3.5% (Cap 8%)</b> · Max Trades: <b>2</b></div>
+              <div class="small muted">Daily Goal: <b>+35% Lock</b> · DD Breaker: <b>-10%</b></div>
+              <div class="small" style="color:#26a69a; margin-top:3px;">Allowed: Micro-safe symbols only (V10–V75, FX Vol, FlipX, Step)</div>
             </div>
             <div style="background:var(--bg-0); padding:8px 10px; border-radius:4px; border-left:3px solid #26a69a;">
               <div style="font-weight:700; color:#26a69a; font-size:11.5px;">Tier 2: Growth Starter ($100–$499)</div>

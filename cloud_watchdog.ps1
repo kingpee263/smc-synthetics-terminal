@@ -7,11 +7,13 @@
 
 $ErrorActionPreference = "Continue"
 
-$repoDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoDir      = Split-Path -Parent $MyInvocation.MyCommand.Path
 $serverScript = Join-Path $repoDir "server.ps1"
-$commonSmc  = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\Common\Files\smc_bridge"
-$derivExe   = "C:\Program Files\MetaTrader 5\terminal64.exe"
-$wtExe      = "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe"
+$commonSmc    = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\Common\Files\smc_bridge"
+$derivExe     = "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe"
+$derivIni     = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\06ECD6BB937B24BE6A2DF310EF01AEFF\config\autostart_smc.ini"
+$wtExe        = "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade_2\terminal64.exe"
+$wtIni        = "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade_2\config\weltrade_startup.ini"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "  SMC 24/7 AUTONOMOUS CLOUD / VPS ENGINE WATCHDOG ACTIVE  " -ForegroundColor Green
@@ -27,7 +29,7 @@ function Ensure-ServerRunning {
   $listener = Get-NetTCPConnection -LocalPort 8095 -State Listen -ErrorAction SilentlyContinue
   if (-not $listener) {
     Write-Host "[WATCHDOG $(Get-Date -Format 'HH:mm:ss')] server.ps1 port 8095 not listening! Restarting background server..." -ForegroundColor Yellow
-    Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$serverScript`"" -WindowStyle Hidden
+    Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$serverScript`"" } -ErrorAction SilentlyContinue | Out-Null
     Start-Sleep -Seconds 3
   }
 }
@@ -36,22 +38,33 @@ function Ensure-DerivRunning {
   if (Test-Path $derivExe) {
     $proc = Get-Process terminal64 -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $derivExe }
     if (-not $proc) {
-      Write-Host "[WATCHDOG $(Get-Date -Format 'HH:mm:ss')] Deriv MT5 is not running! Launching $derivExe..." -ForegroundColor Yellow
-      Start-Process -FilePath $derivExe -WindowStyle Minimized
+      Write-Host "[WATCHDOG $(Get-Date -Format 'HH:mm:ss')] Deriv MT5 (#32398784) is not running! Launching $derivExe..." -ForegroundColor Yellow
+      Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "`"$derivExe`" /skipupdate /config:`"$derivIni`"" } -ErrorAction SilentlyContinue | Out-Null
       Start-Sleep -Seconds 4
     }
   }
 }
 
 function Ensure-WeltradeRunning {
+  # Deriv-Only Mode: Keep Weltrade MT5 offline
   if (Test-Path $wtExe) {
-    $proc = Get-Process terminal64 -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $wtExe }
-    if (-not $proc) {
-      Write-Host "[WATCHDOG $(Get-Date -Format 'HH:mm:ss')] Weltrade MT5 is not running! Launching $wtExe..." -ForegroundColor Yellow
-      Start-Process -FilePath $wtExe -WindowStyle Minimized
-      Start-Sleep -Seconds 4
-    }
+    Get-Process terminal64 -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $wtExe } | Stop-Process -Force -ErrorAction SilentlyContinue
   }
+}
+
+function Ensure-ActiveDemoTrades {
+  try {
+    $accDPath = Join-Path $commonSmc "account_deriv.json"
+    $needDeriv = $true
+    if (Test-Path $accDPath) {
+      $dObj = Get-Content $accDPath -Raw | ConvertFrom-Json
+      if ($dObj.orders -and $dObj.orders.Count -ge 1) { $needDeriv = $false }
+    }
+    if ($needDeriv) {
+      # Deriv Nano Friendly Symbol ($10 account safe): Volatility 75 (1s) Index or Boom 1000 Index
+      Invoke-RestMethod -Uri "http://localhost:8095/api/scalper/quick" -Method Post -ContentType "application/json" -Body '{"broker":"deriv","symbol":"Volatility 75 (1s) Index","lot":0.005,"side":"AUTO"}' -TimeoutSec 4 -ErrorAction SilentlyContinue | Out-Null
+    }
+  } catch {}
 }
 
 function Keep-MachineAwake {

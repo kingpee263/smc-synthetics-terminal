@@ -153,15 +153,15 @@ while ($listener.IsListening) {
       if (-not $script:lastWatchdogCheck -or ($nowUtc - $script:lastWatchdogCheck).TotalSeconds -ge 30) {
         $script:lastWatchdogCheck = $nowUtc
         $mt5Procs = @(Get-CimInstance Win32_Process -Filter "Name = 'terminal64.exe'" -ErrorAction SilentlyContinue)
-        $hasDerivProc = ($mt5Procs | Where-Object { $_.ExecutablePath -like "*Program Files*MetaTrader 5*" }).Count -gt 0
-        $hasWtProc    = ($mt5Procs | Where-Object { $_.ExecutablePath -like "*mt5_weltrade*" }).Count -gt 0
-        if (-not $hasDerivProc -and (Test-Path "C:\Program Files\MetaTrader 5\terminal64.exe")) {
-          $derivIni = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\config\deriv_startup.ini"
-          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "`"C:\Program Files\MetaTrader 5\terminal64.exe`" /config:`"$derivIni`"" } -ErrorAction SilentlyContinue | Out-Null
+        $hasDerivProc = ($mt5Procs | Where-Object { $_.ExecutablePath -like "*mt5_weltrade\terminal64.exe" }).Count -gt 0
+        $hasWtProc    = ($mt5Procs | Where-Object { $_.ExecutablePath -like "*mt5_weltrade_2\terminal64.exe" }).Count -gt 0
+        if (-not $hasDerivProc -and (Test-Path "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe")) {
+          $derivIni = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\06ECD6BB937B24BE6A2DF310EF01AEFF\config\autostart_smc.ini"
+          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "`"C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe`" /config:`"$derivIni`"" } -ErrorAction SilentlyContinue | Out-Null
         }
-        if (-not $hasWtProc -and (Test-Path "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe")) {
-          $wtIni = "C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\06ECD6BB937B24BE6A2DF310EF01AEFF\config\weltrade_startup.ini"
-          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "`"C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade\terminal64.exe`" /config:`"$wtIni`"" } -ErrorAction SilentlyContinue | Out-Null
+        if (-not $hasWtProc -and (Test-Path "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade_2\terminal64.exe")) {
+          $wtIni = "C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade_2\config\weltrade_startup.ini"
+          Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "`"C:\Users\Administrator\.gemini\antigravity\scratch\mt5_weltrade_2\terminal64.exe`" /portable /config:`"$wtIni`"" } -ErrorAction SilentlyContinue | Out-Null
         }
       }
 
@@ -800,7 +800,7 @@ while ($listener.IsListening) {
           if ($brokerReq -eq "deriv" -or $brokerReq -eq "both") {
             $derivSym = $symReq
             if ([string]::IsNullOrWhiteSpace($derivSym) -or $derivSym -match "Pain|Gain|Flip|Switch|BreakX|FX Vol|SFX Vol") {
-              $derivSym = "Boom 1000 Index"
+              $derivSym = "Volatility 75 (1s) Index"
             }
             $sideD = $sideReq
             if ($sideD -eq "AUTO") {
@@ -818,7 +818,7 @@ while ($listener.IsListening) {
           if ($brokerReq -eq "weltrade" -or $brokerReq -eq "both") {
             $wtSym = $symReq
             if ([string]::IsNullOrWhiteSpace($wtSym) -or -not ($wtSym -match "Pain|Gain|Flip|Switch|BreakX|FX Vol|SFX Vol")) {
-              $wtSym = "SFX Vol 80"
+              $wtSym = "FX Vol 20"
             }
             # Toxic check
             if ($wtSym -match "PAINX 1200|PAINX 600|VOLATILITY 50 INDEX|1HZ50V") {
