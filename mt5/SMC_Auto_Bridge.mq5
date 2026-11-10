@@ -392,8 +392,39 @@ bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBloc
       }
    }
 
-   // Tier 0 & Tier 1 ($4 - $99): Block heavy tick-value / high-margin indices while allowing Nano-safe Deriv & Weltrade pairs
-   if(equity < 100.0)
+   // Micro-Safe Whitelist Guard for Small Accounts (< $50)
+   if(equity < 50.0)
+   {
+      // Prohibit dangerous/high-tick instruments that can gap/spike
+      if(StringFind(up, "JUMP") >= 0 || StringFind(up, "BOOM") >= 0 || 
+         StringFind(up, "CRASH") >= 0 || StringFind(up, "STEP") >= 0 ||
+         StringFind(up, "RANGE BREAK") >= 0 || StringFind(up, "DEX") >= 0 ||
+         StringFind(up, "PAINX") >= 0 || StringFind(up, "GAINX") >= 0 ||
+         StringFind(up, "BREAKX") >= 0 || StringFind(up, "SWITCHX") >= 0)
+      {
+         outBlockReason = StringFormat("Micro Account ($%.2f < $50): %s blocked (Jump/Boom/Crash/Step/Spike excluded)", equity, sym);
+         return false;
+      }
+
+      // Explicitly allow only micro-safe volatility synthetics and major forex
+      bool isAllowedMicro = (StringFind(up, "VOLATILITY 75 (1S)") >= 0 ||
+                             StringFind(up, "VOLATILITY 10 (1S)") >= 0 ||
+                             StringFind(up, "VOLATILITY 50 (1S)") >= 0 ||
+                             StringFind(up, "VOLATILITY 100 (1S)") >= 0 ||
+                             StringFind(up, "VOLATILITY 25 (1S)") >= 0 ||
+                             StringFind(up, "VOLATILITY 75 INDEX") >= 0 ||
+                             StringFind(up, "VOLATILITY 10 INDEX") >= 0 ||
+                             StringFind(up, "EURUSD") >= 0 ||
+                             StringFind(up, "USDJPY") >= 0 ||
+                             StringFind(up, "GBPUSD") >= 0);
+      if(!isAllowedMicro)
+      {
+         outBlockReason = StringFormat("Micro Account ($%.2f < $50): %s not on micro-safe whitelist", equity, sym);
+         return false;
+      }
+   }
+   // Tier 1 ($50 - $99): Block heavy tick-value / high-margin indices
+   else if(equity < 100.0)
    {
       if(StringFind(up, "SFX VOL 80") >= 0 || StringFind(up, "SFX VOL 99") >= 0 ||
          StringFind(up, "GAINX 1200") >= 0 ||
@@ -402,7 +433,7 @@ bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBloc
          StringFind(up, "JUMP 100") >= 0 || StringFind(up, "JUMP 75") >= 0 || StringFind(up, "JUMP 50") >= 0 ||
          StringFind(up, "VOLATILITY 100 INDEX") >= 0 || StringFind(up, "VOLATILITY 250") >= 0 || StringFind(up, "VOLATILITY 200") >= 0)
       {
-         outBlockReason = StringFormat("Balance-Tier Shield ($%.2f < $100): Blocked heavy index %s (Only Nano/Micro-Safe symbols allowed)", equity, sym);
+         outBlockReason = StringFormat("Balance-Tier Shield ($%.2f < $100): Blocked heavy index %s", equity, sym);
          return false;
       }
    }
@@ -990,7 +1021,7 @@ void ManageOpenPositionsAndTrailing()
       // ===================================================================
       double accEq = AccountInfoDouble(ACCOUNT_EQUITY);
       bool isNanoAcc = (accEq > 0.0 && accEq < 55.0);
-      bool triggerBeArmor = isNanoAcc ? (currentR >= 0.50 || curNetPnl >= 0.35) : (currentR >= 0.65);
+      bool triggerBeArmor = isNanoAcc ? (currentR >= 0.40 || curNetPnl >= 0.25) : (currentR >= 0.60);
 
       if(triggerBeArmor)
       {
@@ -1008,9 +1039,9 @@ void ManageOpenPositionsAndTrailing()
          }
       }
 
-      if(currentR >= (isNanoAcc ? 1.00 : 1.20))
+      if(currentR >= (isNanoAcc ? 0.90 : 1.10))
       {
-         double lock12 = isBuy ? (openP + initRisk * 0.35) : (openP - initRisk * 0.35);
+         double lock12 = isBuy ? (openP + initRisk * 0.40) : (openP - initRisk * 0.40);
          if(isBuy)
          {
             if(curSl == 0.0 || lock12 > candidateSl + point)
@@ -1023,7 +1054,7 @@ void ManageOpenPositionsAndTrailing()
          }
       }
 
-      if(currentR >= (isNanoAcc ? 1.50 : 1.70))
+      if(currentR >= (isNanoAcc ? 1.40 : 1.65))
       {
          double lock17 = isBuy ? (openP + initRisk * 0.85) : (openP - initRisk * 0.85);
          if(isBuy)
@@ -1091,8 +1122,44 @@ void ManageOpenPositionsAndTrailing()
 }
 
 //+------------------------------------------------------------------+
+//| Price Action Technical Indicators (Fast In-Memory RSI & EMA)    |
+//+------------------------------------------------------------------+
+double CalculateRSI(const MqlRates &rates[], int idx, int period = 14)
+{
+   if(idx < period + 1) return 50.0;
+   double gains = 0.0, losses = 0.0;
+   for(int i = idx - period + 1; i <= idx; i++)
+   {
+      double diff = rates[i].close - rates[i-1].close;
+      if(diff > 0.0) gains += diff;
+      else losses -= diff;
+   }
+   double avgGain = gains / (double)period;
+   double avgLoss = losses / (double)period;
+   if(avgLoss <= 1e-12) return 100.0;
+   if(avgGain <= 1e-12) return 0.0;
+   double rs = avgGain / avgLoss;
+   return 100.0 - (100.0 / (1.0 + rs));
+}
+
+double CalculateEMA(const MqlRates &rates[], int idx, int period = 50)
+{
+   if(idx < 5) return rates[idx].close;
+   int p = MathMin(period, idx);
+   double k = 2.0 / (p + 1.0);
+   int start = MathMax(0, idx - p * 2);
+   double ema = rates[start].close;
+   for(int i = start + 1; i <= idx; i++)
+   {
+      ema = (rates[i].close * k) + (ema * (1.0 - k));
+   }
+   return ema;
+}
+
+//+------------------------------------------------------------------+
 //| Price Action Pattern Detection Engine                            |
 //| Patterns: Double Top, Double Bottom, Rising Wedge, Falling Wedge |
+//| Confluence: RSI Regular Divergence + EMA(50) Macro Trend Filter |
 //+------------------------------------------------------------------+
 
 // 1. Double Top Pattern (Bearish Reversal / "M" Formation)
@@ -1162,6 +1229,22 @@ bool DetectDoubleTop(const string sym, const MqlRates &rates[], int totalBars, d
 
    if(!isNeckBreak && !isPeakRejection) return false;
 
+   // 1. Bearish RSI Divergence: Peak 2 RSI is lower than Peak 1 RSI (momentum exhausting)
+   double rsiP1 = CalculateRSI(rates, p1Idx, 14);
+   double rsiP2 = CalculateRSI(rates, p2Idx, 14);
+   bool hasBearishDiv = (rsiP2 <= rsiP1 - 1.0);
+   bool isOverbought   = (rsiP1 >= 58.0 || rsiP2 >= 55.0);
+
+   double divScore = 0.0;
+   if(hasBearishDiv) divScore += 20.0;
+   if(isOverbought)  divScore += 10.0;
+   if(rsiP2 > rsiP1 + 6.0) divScore -= 18.0; // Severe Hidden Bullish Divergence penalty
+
+   // 2. Macro EMA(50) Trend Alignment
+   double ema50 = CalculateEMA(rates, curBar, 50);
+   bool withTrend = (rates[curBar].close <= ema50 + atr * 0.25);
+   double trendScore = withTrend ? 15.0 : 0.0;
+
    outEntry = curPrice;
    outSl = MathMax(p1Price, p2Price) + atr * 0.25;
    double risk = MathAbs(outSl - outEntry);
@@ -1171,13 +1254,14 @@ bool DetectDoubleTop(const string sym, const MqlRates &rates[], int totalBars, d
    double rr = MathAbs(outTp - outEntry) / risk;
    if(rr < InpMinRR - 0.05) return false;
 
-   double symmScore = MathMax(0.0, 1.0 - (peakDiff / (atr * 0.40))) * 35.0;
-   double heightScore = MathMin(1.0, patternHeight / (atr * 2.5)) * 30.0;
-   double trigScore = isNeckBreak ? 25.0 : 18.0;
-   outScore = MathMin(99.0, symmScore + heightScore + trigScore + 10.0);
+   double symmScore   = MathMax(0.0, 1.0 - (peakDiff / (atr * 0.40))) * 25.0;
+   double heightScore = MathMin(1.0, patternHeight / (atr * 2.5)) * 20.0;
+   double trigScore   = isNeckBreak ? 18.0 : 12.0;
+   outScore = MathMin(99.0, symmScore + heightScore + trigScore + divScore + trendScore);
    outTag = isNeckBreak ? "DOUBLE_TOP_NECK_BREAK" : "DOUBLE_TOP_PEAK_REJECT";
+   if(hasBearishDiv) outTag += "_RSI_DIV";
 
-   return (outScore >= 70.0);
+   return (outScore >= 80.0); // Strict elite quality threshold
 }
 
 // 2. Double Bottom Pattern (Bullish Reversal / "W" Formation)
@@ -1244,6 +1328,22 @@ bool DetectDoubleBottom(const string sym, const MqlRates &rates[], int totalBars
 
    if(!isNeckBreak && !isTroughRejection) return false;
 
+   // 1. Bullish RSI Divergence: Trough 2 RSI is higher than Trough 1 RSI (buyers accumulating)
+   double rsiT1 = CalculateRSI(rates, t1Idx, 14);
+   double rsiT2 = CalculateRSI(rates, t2Idx, 14);
+   bool hasBullishDiv = (rsiT2 >= rsiT1 + 1.0);
+   bool isOversold    = (rsiT1 <= 42.0 || rsiT2 <= 45.0);
+
+   double divScore = 0.0;
+   if(hasBullishDiv) divScore += 20.0;
+   if(isOversold)    divScore += 10.0;
+   if(rsiT2 < rsiT1 - 6.0) divScore -= 18.0; // Severe Hidden Bearish Divergence penalty
+
+   // 2. Macro EMA(50) Trend Alignment
+   double ema50 = CalculateEMA(rates, curBar, 50);
+   bool withTrend = (rates[curBar].close >= ema50 - atr * 0.25);
+   double trendScore = withTrend ? 15.0 : 0.0;
+
    outEntry = curPrice;
    outSl = MathMin(t1Price, t2Price) - atr * 0.25;
    double risk = MathAbs(outEntry - outSl);
@@ -1253,13 +1353,14 @@ bool DetectDoubleBottom(const string sym, const MqlRates &rates[], int totalBars
    double rr = MathAbs(outTp - outEntry) / risk;
    if(rr < InpMinRR - 0.05) return false;
 
-   double symmScore = MathMax(0.0, 1.0 - (troughDiff / (atr * 0.40))) * 35.0;
-   double heightScore = MathMin(1.0, patternHeight / (atr * 2.5)) * 30.0;
-   double trigScore = isNeckBreak ? 25.0 : 18.0;
-   outScore = MathMin(99.0, symmScore + heightScore + trigScore + 10.0);
+   double symmScore   = MathMax(0.0, 1.0 - (troughDiff / (atr * 0.40))) * 25.0;
+   double heightScore = MathMin(1.0, patternHeight / (atr * 2.5)) * 20.0;
+   double trigScore   = isNeckBreak ? 18.0 : 12.0;
+   outScore = MathMin(99.0, symmScore + heightScore + trigScore + divScore + trendScore);
    outTag = isNeckBreak ? "DOUBLE_BOTTOM_NECK_BREAK" : "DOUBLE_BOTTOM_TROUGH_REJECT";
+   if(hasBullishDiv) outTag += "_RSI_DIV";
 
-   return (outScore >= 70.0);
+   return (outScore >= 80.0); // Strict elite quality threshold
 }
 
 // 3. Rising Wedge Pattern (Ascending Wedge - Bearish Breakdown)
@@ -1310,6 +1411,12 @@ bool DetectRisingWedge(const string sym, const MqlRates &rates[], int totalBars,
    if(curPrice >= supAtNow + atr * 0.05) return false;
    if(rates[curBar].close >= rates[curBar].open) return false;
 
+   // RSI Bearish Momentum Exhaustion Check
+   double rsiH1 = CalculateRSI(rates, h1, 14);
+   double rsiH2 = CalculateRSI(rates, h2, 14);
+   bool wedgeBearDiv = (rsiH2 <= rsiH1);
+   double wedgeDivScore = wedgeBearDiv ? 18.0 : 0.0;
+
    outEntry = curPrice;
    outSl = hp2 + atr * 0.25;
    double risk = MathAbs(outSl - outEntry);
@@ -1319,12 +1426,13 @@ bool DetectRisingWedge(const string sym, const MqlRates &rates[], int totalBars,
    double rr = MathAbs(outTp - outEntry) / risk;
    if(rr < InpMinRR - 0.05) return false;
 
-   double convScore = MathMin(1.0, (slopeL - slopeH) / slopeL) * 35.0;
-   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 35.0;
-   outScore = MathMin(99.0, convScore + contractScore + 25.0);
+   double convScore = MathMin(1.0, (slopeL - slopeH) / slopeL) * 30.0;
+   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 30.0;
+   outScore = MathMin(99.0, convScore + contractScore + wedgeDivScore + 20.0);
    outTag = "RISING_WEDGE_BREAKDOWN";
+   if(wedgeBearDiv) outTag += "_RSI_DIV";
 
-   return (outScore >= 70.0);
+   return (outScore >= 80.0);
 }
 
 // 4. Falling Wedge Pattern (Descending Wedge - Bullish Breakout)
@@ -1375,6 +1483,12 @@ bool DetectFallingWedge(const string sym, const MqlRates &rates[], int totalBars
    if(curPrice <= resAtNow - atr * 0.05) return false;
    if(rates[curBar].close <= rates[curBar].open) return false;
 
+   // RSI Bullish Momentum Accumulation Check
+   double rsiL1 = CalculateRSI(rates, l1, 14);
+   double rsiL2 = CalculateRSI(rates, l2, 14);
+   bool wedgeBullDiv = (rsiL2 >= rsiL1);
+   double wedgeDivScore = wedgeBullDiv ? 18.0 : 0.0;
+
    outEntry = curPrice;
    outSl = lp2 - atr * 0.25;
    double risk = MathAbs(outEntry - outSl);
@@ -1384,12 +1498,13 @@ bool DetectFallingWedge(const string sym, const MqlRates &rates[], int totalBars
    double rr = MathAbs(outTp - outEntry) / risk;
    if(rr < InpMinRR - 0.05) return false;
 
-   double convScore = MathMin(1.0, (slopeL - slopeH) / MathAbs(slopeH)) * 35.0;
-   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 35.0;
-   outScore = MathMin(99.0, convScore + contractScore + 25.0);
+   double convScore = MathMin(1.0, (slopeL - slopeH) / MathAbs(slopeH)) * 30.0;
+   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 30.0;
+   outScore = MathMin(99.0, convScore + contractScore + wedgeDivScore + 20.0);
    outTag = "FALLING_WEDGE_BREAKOUT";
+   if(wedgeBullDiv) outTag += "_RSI_DIV";
 
-   return (outScore >= 70.0);
+   return (outScore >= 80.0);
 }
 
 //+------------------------------------------------------------------+

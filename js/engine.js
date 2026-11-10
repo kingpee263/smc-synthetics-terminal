@@ -747,6 +747,35 @@
     return { checks, grade, passes, total: applicable.length };
   }
 
+  /* ---------------- Fast In-Memory Indicators for Price Action ---------------- */
+  function calcRsi(candles, idx, period = 14) {
+    if (!candles || idx < period + 1) return 50.0;
+    let gains = 0, losses = 0;
+    for (let i = idx - period + 1; i <= idx; i++) {
+      const diff = candles[i].close - candles[i - 1].close;
+      if (diff > 0) gains += diff;
+      else losses -= diff;
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss <= 1e-12) return 100.0;
+    if (avgGain <= 1e-12) return 0.0;
+    const rs = avgGain / avgLoss;
+    return 100.0 - (100.0 / (1.0 + rs));
+  }
+
+  function calcEma(candles, idx, period = 50) {
+    if (!candles || idx < 5) return (candles && candles[idx]) ? candles[idx].close : 0;
+    const p = Math.min(period, idx);
+    const k = 2.0 / (p + 1.0);
+    const start = Math.max(0, idx - p * 2);
+    let ema = candles[start].close;
+    for (let i = start + 1; i <= idx; i++) {
+      ema = (candles[i].close * k) + (ema * (1.0 - k));
+    }
+    return ema;
+  }
+
   /* ---------------- Pure Price Action Patterns (Double Top/Bottom, Rising/Falling Wedge) ---------------- */
   function detectPriceActionPatterns(candles, market, pair, o) {
     if (!candles || candles.length < 35) return [];
@@ -780,6 +809,12 @@
         const isNeckBreak = curPrice <= neckPrice + a * 0.15 && candles[curBar].close < candles[curBar].open;
         const isPeakReject = curPrice < p2P - a * 0.30 && (curBar - p2) <= 8 && candles[curBar].close < candles[curBar].open;
         if (isNeckBreak || isPeakReject) {
+          const rsi1 = calcRsi(candles, p1, 14);
+          const rsi2 = calcRsi(candles, p2, 14);
+          const hasBearDiv = (rsi2 <= rsi1 - 1.0);
+          const ema50 = calcEma(candles, curBar, 50);
+          const withTrend = curPrice <= ema50 + a * 0.25;
+
           const sl = Math.max(p1P, p2P) + a * 0.25;
           const risk = Math.max(sl - curPrice, a * 0.35);
           const tp1 = curPrice - Math.max(height * 0.618, risk * 1.5);
@@ -820,7 +855,9 @@
               { key: 'pa1', title: '1 · Symmetrical Dual Peaks (M-Pattern)', status: 'pass', text: `Peak 1: ${p1P.toFixed(2)} · Peak 2: ${p2P.toFixed(2)} (Diff: ${(diff).toFixed(2)})` },
               { key: 'pa2', title: '2 · Defined Neckline Support', status: 'pass', text: `Neckline at ${neckPrice.toFixed(2)} · Pattern Height: ${height.toFixed(2)}` },
               { key: 'pa3', title: '3 · Breakout / Rejection Confirmation', status: 'pass', text: isNeckBreak ? 'Confirmed Neckline Breakdown' : 'Peak 2 Bearish Rejection' },
-              { key: 'pa4', title: '4 · Institutional Risk-to-Reward Ratio', status: rr2 >= 2.0 ? 'pass' : 'warn', text: `TP1 ${rr1.toFixed(1)}R · TP2 ${rr2.toFixed(1)}R` }
+              { key: 'pa4', title: '4 · Institutional Risk-to-Reward Ratio', status: rr2 >= 2.0 ? 'pass' : 'warn', text: `TP1 ${rr1.toFixed(1)}R · TP2 ${rr2.toFixed(1)}R` },
+              { key: 'pa5', title: '5 · RSI Regular Bearish Divergence', status: hasBearDiv ? 'pass' : 'warn', text: `P1 RSI: ${rsi1.toFixed(1)} -> P2 RSI: ${rsi2.toFixed(1)} (${hasBearDiv ? 'Bearish Divergence Confirmed' : 'Moderate Momentum'})` },
+              { key: 'pa6', title: '6 · Macro Trend Confluence (50 EMA)', status: withTrend ? 'pass' : 'warn', text: `Price ${curPrice.toFixed(2)} ${withTrend ? 'trading with' : 'above'} 50 EMA (${ema50.toFixed(2)})` }
             ],
             grade: 'A+'
           });
@@ -851,6 +888,12 @@
         const isNeckBreak = curPrice >= neckPrice - a * 0.15 && candles[curBar].close > candles[curBar].open;
         const isTroughReject = curPrice > t2P + a * 0.30 && (curBar - t2) <= 8 && candles[curBar].close > candles[curBar].open;
         if (isNeckBreak || isTroughReject) {
+          const rsi1 = calcRsi(candles, t1, 14);
+          const rsi2 = calcRsi(candles, t2, 14);
+          const hasBullDiv = (rsi2 >= rsi1 + 1.0);
+          const ema50 = calcEma(candles, curBar, 50);
+          const withTrend = curPrice >= ema50 - a * 0.25;
+
           const sl = Math.min(t1P, t2P) - a * 0.25;
           const risk = Math.max(curPrice - sl, a * 0.35);
           const tp1 = curPrice + Math.max(height * 0.618, risk * 1.5);
@@ -891,7 +934,9 @@
               { key: 'pa1', title: '1 · Symmetrical Dual Troughs (W-Pattern)', status: 'pass', text: `Trough 1: ${t1P.toFixed(2)} · Trough 2: ${t2P.toFixed(2)} (Diff: ${(diff).toFixed(2)})` },
               { key: 'pa2', title: '2 · Defined Neckline Resistance', status: 'pass', text: `Neckline at ${neckPrice.toFixed(2)} · Pattern Height: ${height.toFixed(2)}` },
               { key: 'pa3', title: '3 · Breakout / Bounce Confirmation', status: 'pass', text: isNeckBreak ? 'Confirmed Neckline Breakout' : 'Trough 2 Bullish Bounce' },
-              { key: 'pa4', title: '4 · Institutional Risk-to-Reward Ratio', status: rr2 >= 2.0 ? 'pass' : 'warn', text: `TP1 ${rr1.toFixed(1)}R · TP2 ${rr2.toFixed(1)}R` }
+              { key: 'pa4', title: '4 · Institutional Risk-to-Reward Ratio', status: rr2 >= 2.0 ? 'pass' : 'warn', text: `TP1 ${rr1.toFixed(1)}R · TP2 ${rr2.toFixed(1)}R` },
+              { key: 'pa5', title: '5 · RSI Regular Bullish Divergence', status: hasBullDiv ? 'pass' : 'warn', text: `T1 RSI: ${rsi1.toFixed(1)} -> T2 RSI: ${rsi2.toFixed(1)} (${hasBullDiv ? 'Bullish Divergence Confirmed' : 'Moderate Momentum'})` },
+              { key: 'pa6', title: '6 · Macro Trend Confluence (50 EMA)', status: withTrend ? 'pass' : 'warn', text: `Price ${curPrice.toFixed(2)} ${withTrend ? 'trading with' : 'below'} 50 EMA (${ema50.toFixed(2)})` }
             ],
             grade: 'A+'
           });
