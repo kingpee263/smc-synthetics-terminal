@@ -880,6 +880,85 @@
   <main class="view" id="view-learning">
     <div style="display:flex; flex-direction:column; gap:14px; padding:12px; max-width:1400px; margin:0 auto; width:100%;">
       
+      <!-- Real-Time Online Self-Learning Brain Status -->
+      <div class="card" style="padding:14px; background:linear-gradient(135deg, rgba(37,99,235,0.12) 0%, rgba(13,20,36,0.98) 100%); border:1px solid rgba(56,189,248,0.35); border-radius:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:16px; font-weight:800; color:#38bdf8;">🧠 Real-Time Online Learning Brain &amp; Pattern Expectancy Matrix</span>
+              <span class="st-pill st-live" id="brainStatusBadge">v5.10 ONLINE ACTIVE</span>
+            </div>
+            <div class="small muted" style="margin-top:2px;">Continuous Bayesian feedback loop: learns from every closed deal on Deriv MT5, dynamically boosts high-expectancy patterns, and auto-quarantines lagging pairs.</div>
+          </div>
+          <div style="font-size:12px; color:#94a3b8;">
+            Last Updated: <span id="brainUpdatedText" class="mono" style="color:#38bdf8;">Active</span>
+          </div>
+        </div>
+
+        <!-- 4 Pattern Expectancy Dynamic Cards -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:10px;" id="brainPatternCards">
+          <div style="background:rgba(0,0,0,0.35); padding:10px 12px; border-radius:6px; border-left:3px solid #22c55e;" id="pcard-dt">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <b style="color:#fff; font-size:12px;">Double Top (M-Pattern)</b>
+              <span class="st-pill" style="font-size:10px; background:rgba(34,197,94,0.2); color:#22c55e;" id="dtStatus">ACTIVE</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11.5px; color:#94a3b8;">
+              <span>Deals: <b id="dtDeals" style="color:#fff;">--</b></span>
+              <span>Win Rate: <b id="dtWinRate" style="color:#22c55e;">--%</b></span>
+              <span>Expectancy: <b id="dtExpR" style="color:#38bdf8;">--R</b></span>
+            </div>
+            <div style="margin-top:4px; font-size:11px; color:#64748b;">
+              Adaptive Score Multiplier: <b id="dtMult" style="color:#fbbf24;">1.00x</b>
+            </div>
+          </div>
+
+          <div style="background:rgba(0,0,0,0.35); padding:10px 12px; border-radius:6px; border-left:3px solid #22c55e;" id="pcard-db">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <b style="color:#fff; font-size:12px;">Double Bottom (W-Pattern)</b>
+              <span class="st-pill" style="font-size:10px; background:rgba(34,197,94,0.2); color:#22c55e;" id="dbStatus">ACTIVE</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11.5px; color:#94a3b8;">
+              <span>Deals: <b id="dbDeals" style="color:#fff;">--</b></span>
+              <span>Win Rate: <b id="dbWinRate" style="color:#22c55e;">--%</b></span>
+              <span>Expectancy: <b id="dbExpR" style="color:#38bdf8;">--R</b></span>
+            </div>
+            <div style="margin-top:4px; font-size:11px; color:#64748b;">
+              Adaptive Score Multiplier: <b id="dbMult" style="color:#fbbf24;">1.00x</b>
+            </div>
+          </div>
+
+          <div style="background:rgba(0,0,0,0.35); padding:10px 12px; border-radius:6px; border-left:3px solid #38bdf8;" id="pcard-rw">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <b style="color:#fff; font-size:12px;">Rising Wedge (Breakdown)</b>
+              <span class="st-pill" style="font-size:10px; background:rgba(56,189,248,0.2); color:#38bdf8;" id="rwStatus">ACTIVE</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11.5px; color:#94a3b8;">
+              <span>Deals: <b id="rwDeals" style="color:#fff;">--</b></span>
+              <span>Win Rate: <b id="rwWinRate" style="color:#38bdf8;">--%</b></span>
+              <span>Expectancy: <b id="rwExpR" style="color:#38bdf8;">--R</b></span>
+            </div>
+            <div style="margin-top:4px; font-size:11px; color:#64748b;">
+              Adaptive Score Multiplier: <b id="rwMult" style="color:#fbbf24;">1.00x</b>
+            </div>
+          </div>
+
+          <div style="background:rgba(0,0,0,0.35); padding:10px 12px; border-radius:6px; border-left:3px solid #38bdf8;" id="pcard-fw">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <b style="color:#fff; font-size:12px;">Falling Wedge (Breakout)</b>
+              <span class="st-pill" style="font-size:10px; background:rgba(56,189,248,0.2); color:#38bdf8;" id="fwStatus">ACTIVE</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11.5px; color:#94a3b8;">
+              <span>Deals: <b id="fwDeals" style="color:#fff;">--</b></span>
+              <span>Win Rate: <b id="fwWinRate" style="color:#38bdf8;">--%</b></span>
+              <span>Expectancy: <b id="fwExpR" style="color:#38bdf8;">--R</b></span>
+            </div>
+            <div style="margin-top:4px; font-size:11px; color:#64748b;">
+              Adaptive Score Multiplier: <b id="fwMult" style="color:#fbbf24;">1.00x</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Top Intelligence Cards -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px;">
         <div class="card" style="padding:14px; background:var(--bg-1); border-left:4px solid #22c55e;">

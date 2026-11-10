@@ -1,10 +1,11 @@
 //+------------------------------------------------------------------+
 //|                                              SMC_Auto_Bridge.mq5 |
-//|     Frank Miller Smart Money Concepts (SMC) Live MT5 Auto-Bridge |
-//|   Pure A+ Autonomous Execution & Institutional Risk Manager v4.2 |
+//|   Price Action & Continuous Self-Learning Quant Auto-Desk v5.10  |
+//|   Pure Price Action: Double Tops/Bottoms, Rising & Falling Wedges |
+//|   Online Learning Brain + Bayesian Smoothed Alpha Performance    |
 //+------------------------------------------------------------------+
-#property copyright "SMC Desk — Frank Miller Smart Money Concepts"
-#property version   "4.30"
+#property copyright "SMC Desk — Price Action & Online Learning Engine"
+#property version   "5.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -66,6 +67,43 @@ int      g_currentDay     = -1;
 int      g_rrCursor       = 0;
 string   g_brokerSyms[];
 int      g_brokerSymCount = 0;
+
+//+------------------------------------------------------------------+
+//| Continuous Online Learning & Pattern Expectancy Matrix Structs  |
+//+------------------------------------------------------------------+
+struct SPatternStats
+{
+   string   name;
+   int      totalDeals;
+   int      wins;
+   int      losses;
+   double   netPnl;
+   double   winRate;
+   double   expectancyR;
+   double   adaptiveMultiplier;
+   int      consecutiveLosses;
+   bool     isQuarantined;
+   datetime quarantineExpiry;
+};
+
+struct SSymbolStats
+{
+   string   symbol;
+   int      totalDeals;
+   int      wins;
+   int      losses;
+   double   netPnl;
+   double   winRate;
+   double   bayesianWinRate;
+   bool     isAlpha;
+   bool     isQuarantined;
+   datetime quarantineExpiry;
+};
+
+SPatternStats g_patterns[4];
+SSymbolStats  g_symbolStats[];
+int           g_symbolStatsCount = 0;
+datetime      g_lastBrainUpdate  = 0;
 
 //+------------------------------------------------------------------+
 //| Detect whether this MT5 instance is connected to Weltrade        |
@@ -136,11 +174,17 @@ int OnInit()
    TimeCurrent(dt);
    g_currentDay = dt.day_of_year;
 
+   // Initialize Online Learning Pattern Structs
+   g_patterns[0].name = "DOUBLE_TOP";     g_patterns[0].adaptiveMultiplier = 1.0; g_patterns[0].isQuarantined = false; g_patterns[0].quarantineExpiry = 0;
+   g_patterns[1].name = "DOUBLE_BOTTOM";  g_patterns[1].adaptiveMultiplier = 1.0; g_patterns[1].isQuarantined = false; g_patterns[1].quarantineExpiry = 0;
+   g_patterns[2].name = "RISING_WEDGE";   g_patterns[2].adaptiveMultiplier = 1.0; g_patterns[2].isQuarantined = false; g_patterns[2].quarantineExpiry = 0;
+   g_patterns[3].name = "FALLING_WEDGE";  g_patterns[3].adaptiveMultiplier = 1.0; g_patterns[3].isQuarantined = false; g_patterns[3].quarantineExpiry = 0;
+
    InitBrokerSymbols();
    EventSetTimer(1); // 1-second real-time tick & active chart sync
 
    Print("=================================================================");
-   Print("SMC_Auto_Bridge v4.20 (REAL-TIME 1S SYNC + PURE A+ RISK GUARD) initialized");
+   Print("Price Action & Online Self-Learning Bridge v5.10 initialized");
    Print("Account #", AccountInfoInteger(ACCOUNT_LOGIN), " (", AccountInfoString(ACCOUNT_SERVER), ") | Symbols=", g_brokerSymCount);
    Print("Balance: $", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2),
          " | Equity: $", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2));
@@ -483,6 +527,21 @@ bool CanOpenNewTrade(const string sym, const string comment, string &outReason)
 
    if(!IsSymbolSafeForAccountTier(sym, equity, outReason))
       return false;
+
+   // Online Learning Brain Dynamic Symbol Quarantine Guard
+   for(int sq = 0; sq < g_symbolStatsCount; sq++)
+   {
+      if(g_symbolStats[sq].symbol == sym)
+      {
+         if(g_symbolStats[sq].isQuarantined && TimeCurrent() < g_symbolStats[sq].quarantineExpiry)
+         {
+            outReason = StringFormat("ML Brain Dynamic Quarantine: Blocked %s (WinRate=%.1f%%, Net=$%.2f)",
+                                     sym, g_symbolStats[sq].winRate, g_symbolStats[sq].netPnl);
+            return false;
+         }
+         break;
+      }
+   }
 
    double refCap = MathMax(g_dayStartEquity, balance);
    if(refCap > 0.0)
@@ -1157,9 +1216,279 @@ double CalculateEMA(const MqlRates &rates[], int idx, int period = 50)
 }
 
 //+------------------------------------------------------------------+
+//| Volatility Regime Detector: ATR(14) vs SMA_ATR(50)               |
+//| Distinguishes between dead chop, expansion momentum, and chaos   |
+//+------------------------------------------------------------------+
+double GetVolatilityRegimeRatio(const string sym, ENUM_TIMEFRAMES tf)
+{
+   MqlRates r[];
+   ArraySetAsSeries(r, true);
+   int copied = CopyRates(sym, tf, 0, 55, r);
+   if(copied < 40) return 1.0;
+
+   double atr14 = 0.0;
+   for(int i = 0; i < 14; i++)
+      atr14 += (r[i].high - r[i].low);
+   atr14 /= 14.0;
+
+   double atr50 = 0.0;
+   for(int i = 0; i < copied; i++)
+      atr50 += (r[i].high - r[i].low);
+   atr50 /= (double)copied;
+
+   if(atr50 <= 1e-12) return 1.0;
+   return (atr14 / atr50);
+}
+
+//+------------------------------------------------------------------+
+//| Export ML Brain State to Common Bridge File (smc_bridge\ml_brain.json)|
+//+------------------------------------------------------------------+
+void ExportMLBrainJson()
+{
+   string json = "{\n";
+   json += "  \"version\": \"5.10_ONLINE_LEARNING\",\n";
+   json += "  \"updated\": " + IntegerToString((long)TimeCurrent()) + ",\n";
+   json += "  \"patterns\": [\n";
+   for(int p = 0; p < 4; p++)
+   {
+      if(p > 0) json += ",\n";
+      json += StringFormat("    {\"name\":\"%s\",\"deals\":%d,\"wins\":%d,\"losses\":%d,\"winRate\":%.1f,\"expectancyR\":%.2f,\"multiplier\":%.2f,\"quarantined\":%s}",
+                           g_patterns[p].name, g_patterns[p].totalDeals, g_patterns[p].wins, g_patterns[p].losses,
+                           g_patterns[p].winRate, g_patterns[p].expectancyR, g_patterns[p].adaptiveMultiplier,
+                           (g_patterns[p].isQuarantined ? "true" : "false"));
+   }
+   json += "\n  ],\n";
+
+   json += "  \"alphaSymbols\": [";
+   bool firstAlpha = true;
+   for(int s = 0; s < g_symbolStatsCount; s++)
+   {
+      if(g_symbolStats[s].isAlpha)
+      {
+         if(!firstAlpha) json += ",";
+         firstAlpha = false;
+         json += StringFormat("{\"symbol\":\"%s\",\"deals\":%d,\"winRate\":%.1f,\"netPnl\":%.2f}",
+                              g_symbolStats[s].symbol, g_symbolStats[s].totalDeals, g_symbolStats[s].winRate, g_symbolStats[s].netPnl);
+      }
+   }
+   json += "],\n";
+
+   json += "  \"quarantinedSymbols\": [";
+   bool firstQ = true;
+   for(int s = 0; s < g_symbolStatsCount; s++)
+   {
+      if(g_symbolStats[s].isQuarantined)
+      {
+         if(!firstQ) json += ",";
+         firstQ = false;
+         json += "\"" + g_symbolStats[s].symbol + "\"";
+      }
+   }
+   json += "]\n";
+   json += "}";
+
+   int fh = FileOpen("smc_bridge\\ml_brain.json", FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(fh != INVALID_HANDLE)
+   {
+      FileWriteString(fh, json);
+      FileClose(fh);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Continuous Online Learning Brain: Recalculate Weights from History|
+//+------------------------------------------------------------------+
+void UpdateOnlineLearningBrain()
+{
+   if(TimeCurrent() - g_lastBrainUpdate < 15) return;
+   g_lastBrainUpdate = TimeCurrent();
+
+   // Reset counters
+   for(int p = 0; p < 4; p++)
+   {
+      g_patterns[p].totalDeals = 0;
+      g_patterns[p].wins = 0;
+      g_patterns[p].losses = 0;
+      g_patterns[p].netPnl = 0.0;
+   }
+
+   // Initialize / reset symbol stats
+   if(g_symbolStatsCount != g_brokerSymCount)
+   {
+      ArrayResize(g_symbolStats, g_brokerSymCount);
+      g_symbolStatsCount = g_brokerSymCount;
+      for(int s = 0; s < g_symbolStatsCount; s++)
+      {
+         g_symbolStats[s].symbol = g_brokerSyms[s];
+         g_symbolStats[s].totalDeals = 0;
+         g_symbolStats[s].wins = 0;
+         g_symbolStats[s].losses = 0;
+         g_symbolStats[s].netPnl = 0.0;
+         g_symbolStats[s].winRate = 0.0;
+         g_symbolStats[s].bayesianWinRate = 0.50;
+         g_symbolStats[s].isAlpha = false;
+         g_symbolStats[s].isQuarantined = false;
+         g_symbolStats[s].quarantineExpiry = 0;
+      }
+   }
+   else
+   {
+      for(int s = 0; s < g_symbolStatsCount; s++)
+      {
+         g_symbolStats[s].totalDeals = 0;
+         g_symbolStats[s].wins = 0;
+         g_symbolStats[s].losses = 0;
+         g_symbolStats[s].netPnl = 0.0;
+      }
+   }
+
+   // Scan past 14 days of closed deals
+   if(HistorySelect(TimeCurrent() - 14 * 86400, TimeCurrent()))
+   {
+      int totalDeals = HistoryDealsTotal();
+      for(int d = totalDeals - 1; d >= 0; d--)
+      {
+         ulong dt = HistoryDealGetTicket(d);
+         if(dt == 0) continue;
+         long entryType = HistoryDealGetInteger(dt, DEAL_ENTRY);
+         if(entryType != DEAL_ENTRY_OUT && entryType != DEAL_ENTRY_INOUT) continue;
+
+         string sym = HistoryDealGetString(dt, DEAL_SYMBOL);
+         if(StringLen(sym) == 0) continue;
+
+         double pnl = HistoryDealGetDouble(dt, DEAL_PROFIT) + HistoryDealGetDouble(dt, DEAL_SWAP) + HistoryDealGetDouble(dt, DEAL_COMMISSION);
+         string comm = HistoryDealGetString(dt, DEAL_COMMENT);
+         StringToUpper(comm);
+
+         // Map deal to pattern
+         int pIdx = -1;
+         if(StringFind(comm, "DOUBLE_TOP") >= 0 || StringFind(comm, "PA_DT") >= 0) pIdx = 0;
+         else if(StringFind(comm, "DOUBLE_BOTTOM") >= 0 || StringFind(comm, "PA_DB") >= 0) pIdx = 1;
+         else if(StringFind(comm, "RISING_WEDGE") >= 0 || StringFind(comm, "PA_RW") >= 0) pIdx = 2;
+         else if(StringFind(comm, "FALLING_WEDGE") >= 0 || StringFind(comm, "PA_FW") >= 0) pIdx = 3;
+
+         if(pIdx >= 0)
+         {
+            g_patterns[pIdx].totalDeals++;
+            g_patterns[pIdx].netPnl += pnl;
+            if(pnl >= 0.0) g_patterns[pIdx].wins++;
+            else           g_patterns[pIdx].losses++;
+         }
+
+         // Map deal to symbol
+         for(int s = 0; s < g_symbolStatsCount; s++)
+         {
+            if(g_symbolStats[s].symbol == sym)
+            {
+               g_symbolStats[s].totalDeals++;
+               g_symbolStats[s].netPnl += pnl;
+               if(pnl >= 0.0) g_symbolStats[s].wins++;
+               else           g_symbolStats[s].losses++;
+               break;
+            }
+         }
+      }
+   }
+
+   // Recalculate Bayesian Win Rates, Expectancy and Multipliers
+   for(int p = 0; p < 4; p++)
+   {
+      int deals = g_patterns[p].totalDeals;
+      int wins  = g_patterns[p].wins;
+      double smoothWr = ((double)wins + 2.0) / ((double)deals + 4.0);
+      g_patterns[p].winRate = (deals > 0) ? (((double)wins / (double)deals) * 100.0) : 50.0;
+      g_patterns[p].expectancyR = (smoothWr * 2.20) - ((1.0 - smoothWr) * 0.70);
+
+      // Adaptive Multiplier: Boost high-performing patterns, penalize lagging patterns
+      if(deals >= 2)
+      {
+         if(smoothWr >= 0.65 && g_patterns[p].netPnl > 0.0)
+            g_patterns[p].adaptiveMultiplier = 1.18; // +18% score boost
+         else if(smoothWr >= 0.55)
+            g_patterns[p].adaptiveMultiplier = 1.08; // +8% score boost
+         else if(smoothWr <= 0.38)
+            g_patterns[p].adaptiveMultiplier = 0.82; // -18% score penalty
+         else
+            g_patterns[p].adaptiveMultiplier = 1.00;
+      }
+      else
+      {
+         g_patterns[p].adaptiveMultiplier = 1.00;
+      }
+
+      // Dynamic quarantine check: if >= 3 deals with winRate < 25% and netPnl < -$5.00
+      if(deals >= 3 && g_patterns[p].winRate < 25.0 && g_patterns[p].netPnl < -5.0)
+      {
+         g_patterns[p].isQuarantined = true;
+         g_patterns[p].quarantineExpiry = TimeCurrent() + 7200; // 2 hour quarantine
+      }
+      else if(g_patterns[p].isQuarantined && TimeCurrent() > g_patterns[p].quarantineExpiry)
+      {
+         g_patterns[p].isQuarantined = false;
+      }
+   }
+
+   // Recalculate Symbol Stats and Alpha Classification
+   for(int s = 0; s < g_symbolStatsCount; s++)
+   {
+      int deals = g_symbolStats[s].totalDeals;
+      int wins  = g_symbolStats[s].wins;
+      double bayesWr = ((double)wins + 2.0) / ((double)deals + 4.0);
+      g_symbolStats[s].bayesianWinRate = bayesWr;
+      g_symbolStats[s].winRate = (deals > 0) ? (((double)wins / (double)deals) * 100.0) : 50.0;
+
+      // Alpha Tier A: Proven winning synthetic
+      if(deals >= 2 && bayesWr >= 0.58 && g_symbolStats[s].netPnl > 0.0)
+         g_symbolStats[s].isAlpha = true;
+      else
+         g_symbolStats[s].isAlpha = false;
+
+      // Symbol quarantine
+      if(deals >= 3 && g_symbolStats[s].winRate < 30.0 && g_symbolStats[s].netPnl < -5.0)
+      {
+         g_symbolStats[s].isQuarantined = true;
+         g_symbolStats[s].quarantineExpiry = TimeCurrent() + 14400; // 4 hour quarantine
+      }
+      else if(g_symbolStats[s].isQuarantined && TimeCurrent() > g_symbolStats[s].quarantineExpiry)
+      {
+         g_symbolStats[s].isQuarantined = false;
+      }
+   }
+
+   // Export ml_brain.json
+   ExportMLBrainJson();
+}
+
+bool IsPatternQuarantined(int patternIdx)
+{
+   if(patternIdx < 0 || patternIdx >= 4) return false;
+   if(g_patterns[patternIdx].isQuarantined && TimeCurrent() < g_patterns[patternIdx].quarantineExpiry)
+      return true;
+   return false;
+}
+
+double GetPatternMultiplier(int patternIdx)
+{
+   if(patternIdx < 0 || patternIdx >= 4) return 1.0;
+   return g_patterns[patternIdx].adaptiveMultiplier;
+}
+
+bool IsSymbolAlphaTier(const string sym)
+{
+   for(int s = 0; s < g_symbolStatsCount; s++)
+   {
+      if(g_symbolStats[s].symbol == sym)
+         return g_symbolStats[s].isAlpha;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
 //| Price Action Pattern Detection Engine                            |
 //| Patterns: Double Top, Double Bottom, Rising Wedge, Falling Wedge |
 //| Confluence: RSI Regular Divergence + EMA(50) Macro Trend Filter |
+//| Confluence: M15 Macro Confirmation + ATR Volatility Regime Filter|
+//| Online Learning: Dynamic Pattern Multiplier + Alpha Symbol Boost |
 //+------------------------------------------------------------------+
 
 // 1. Double Top Pattern (Bearish Reversal / "M" Formation)
@@ -1168,9 +1497,17 @@ bool DetectDoubleTop(const string sym, const MqlRates &rates[], int totalBars, d
 {
    if(totalBars < 40 || atr <= 0.0) return false;
    if(IsCounterSpikeTrade(sym, false)) return false; // Sells blocked on Boom indices
+   if(IsPatternQuarantined(0)) return false; // Online Learning pattern quarantine
 
    int curBar = totalBars - 1;
    double curPrice = rates[curBar].close;
+
+   // Real body pureness check: ensure current trigger candle has decisive real body (no dojis)
+   double barRange = rates[curBar].high - rates[curBar].low;
+   if(barRange <= 0.0) return false;
+   double bodySize = MathAbs(rates[curBar].close - rates[curBar].open);
+   double bodyRatio = bodySize / barRange;
+   if(bodyRatio < 0.25) return false; // Reject doji / indecision candle
 
    // Identify recent swing highs in last 45 bars
    int p1Idx = -1, p2Idx = -1;
@@ -1245,6 +1582,19 @@ bool DetectDoubleTop(const string sym, const MqlRates &rates[], int totalBars, d
    bool withTrend = (rates[curBar].close <= ema50 + atr * 0.25);
    double trendScore = withTrend ? 15.0 : 0.0;
 
+   // 3. Volatility Regime Bonus/Penalty
+   double volRatio = GetVolatilityRegimeRatio(sym, PERIOD_M5);
+   double volScore = 0.0;
+   if(volRatio >= 0.85 && volRatio <= 1.85) volScore += 10.0; // Institutional expansion zone
+   else if(volRatio < 0.70) volScore -= 14.0; // Dead chop guard
+   else if(volRatio > 2.30) volScore -= 10.0; // Hyper-spike risk
+
+   // 4. Decisive Real Candle Body Bonus
+   double bodyBonus = (bodyRatio >= 0.45) ? 8.0 : 0.0;
+
+   // 5. Alpha Symbol Bonus from Online Learning Brain
+   double alphaBonus = IsSymbolAlphaTier(sym) ? 8.0 : 0.0;
+
    outEntry = curPrice;
    outSl = MathMax(p1Price, p2Price) + atr * 0.25;
    double risk = MathAbs(outSl - outEntry);
@@ -1257,11 +1607,15 @@ bool DetectDoubleTop(const string sym, const MqlRates &rates[], int totalBars, d
    double symmScore   = MathMax(0.0, 1.0 - (peakDiff / (atr * 0.40))) * 25.0;
    double heightScore = MathMin(1.0, patternHeight / (atr * 2.5)) * 20.0;
    double trigScore   = isNeckBreak ? 18.0 : 12.0;
-   outScore = MathMin(99.0, symmScore + heightScore + trigScore + divScore + trendScore);
+
+   double rawScore = symmScore + heightScore + trigScore + divScore + trendScore + volScore + bodyBonus + alphaBonus;
+   double mult = GetPatternMultiplier(0);
+   outScore = MathMin(99.0, MathMax(0.0, rawScore * mult));
+
    outTag = isNeckBreak ? "DOUBLE_TOP_NECK_BREAK" : "DOUBLE_TOP_PEAK_REJECT";
    if(hasBearishDiv) outTag += "_RSI_DIV";
 
-   return (outScore >= 80.0); // Strict elite quality threshold
+   return (outScore >= 82.0); // Strict elite quality threshold
 }
 
 // 2. Double Bottom Pattern (Bullish Reversal / "W" Formation)
@@ -1270,9 +1624,17 @@ bool DetectDoubleBottom(const string sym, const MqlRates &rates[], int totalBars
 {
    if(totalBars < 40 || atr <= 0.0) return false;
    if(IsCounterSpikeTrade(sym, true)) return false; // Buys blocked on Crash indices
+   if(IsPatternQuarantined(1)) return false; // Online Learning pattern quarantine
 
    int curBar = totalBars - 1;
    double curPrice = rates[curBar].close;
+
+   // Real body pureness check: ensure current trigger candle has decisive real body (no dojis)
+   double barRange = rates[curBar].high - rates[curBar].low;
+   if(barRange <= 0.0) return false;
+   double bodySize = MathAbs(rates[curBar].close - rates[curBar].open);
+   double bodyRatio = bodySize / barRange;
+   if(bodyRatio < 0.25) return false; // Reject doji / indecision candle
 
    // Identify recent swing lows in last 45 bars
    int t1Idx = -1, t2Idx = -1;
@@ -1344,6 +1706,19 @@ bool DetectDoubleBottom(const string sym, const MqlRates &rates[], int totalBars
    bool withTrend = (rates[curBar].close >= ema50 - atr * 0.25);
    double trendScore = withTrend ? 15.0 : 0.0;
 
+   // 3. Volatility Regime Bonus/Penalty
+   double volRatio = GetVolatilityRegimeRatio(sym, PERIOD_M5);
+   double volScore = 0.0;
+   if(volRatio >= 0.85 && volRatio <= 1.85) volScore += 10.0;
+   else if(volRatio < 0.70) volScore -= 14.0;
+   else if(volRatio > 2.30) volScore -= 10.0;
+
+   // 4. Decisive Real Candle Body Bonus
+   double bodyBonus = (bodyRatio >= 0.45) ? 8.0 : 0.0;
+
+   // 5. Alpha Symbol Bonus from Online Learning Brain
+   double alphaBonus = IsSymbolAlphaTier(sym) ? 8.0 : 0.0;
+
    outEntry = curPrice;
    outSl = MathMin(t1Price, t2Price) - atr * 0.25;
    double risk = MathAbs(outEntry - outSl);
@@ -1356,11 +1731,15 @@ bool DetectDoubleBottom(const string sym, const MqlRates &rates[], int totalBars
    double symmScore   = MathMax(0.0, 1.0 - (troughDiff / (atr * 0.40))) * 25.0;
    double heightScore = MathMin(1.0, patternHeight / (atr * 2.5)) * 20.0;
    double trigScore   = isNeckBreak ? 18.0 : 12.0;
-   outScore = MathMin(99.0, symmScore + heightScore + trigScore + divScore + trendScore);
+
+   double rawScore = symmScore + heightScore + trigScore + divScore + trendScore + volScore + bodyBonus + alphaBonus;
+   double mult = GetPatternMultiplier(1);
+   outScore = MathMin(99.0, MathMax(0.0, rawScore * mult));
+
    outTag = isNeckBreak ? "DOUBLE_BOTTOM_NECK_BREAK" : "DOUBLE_BOTTOM_TROUGH_REJECT";
    if(hasBullishDiv) outTag += "_RSI_DIV";
 
-   return (outScore >= 80.0); // Strict elite quality threshold
+   return (outScore >= 82.0); // Strict elite quality threshold
 }
 
 // 3. Rising Wedge Pattern (Ascending Wedge - Bearish Breakdown)
@@ -1369,9 +1748,16 @@ bool DetectRisingWedge(const string sym, const MqlRates &rates[], int totalBars,
 {
    if(totalBars < 40 || atr <= 0.0) return false;
    if(IsCounterSpikeTrade(sym, false)) return false;
+   if(IsPatternQuarantined(2)) return false; // Online Learning pattern quarantine
 
    int curBar = totalBars - 1;
    double curPrice = rates[curBar].close;
+
+   // Real body pureness check
+   double barRange = rates[curBar].high - rates[curBar].low;
+   if(barRange <= 0.0) return false;
+   double bodyRatio = MathAbs(rates[curBar].close - rates[curBar].open) / barRange;
+   if(bodyRatio < 0.25) return false;
 
    int h1 = -1, h2 = -1, l1 = -1, l2 = -1;
    double hp1 = 0, hp2 = 0, lp1 = 0, lp2 = 0;
@@ -1417,6 +1803,11 @@ bool DetectRisingWedge(const string sym, const MqlRates &rates[], int totalBars,
    bool wedgeBearDiv = (rsiH2 <= rsiH1);
    double wedgeDivScore = wedgeBearDiv ? 18.0 : 0.0;
 
+   // Volatility Regime
+   double volRatio = GetVolatilityRegimeRatio(sym, PERIOD_M5);
+   double volScore = (volRatio >= 0.85 && volRatio <= 1.85) ? 10.0 : ((volRatio < 0.70) ? -14.0 : 0.0);
+   double alphaBonus = IsSymbolAlphaTier(sym) ? 8.0 : 0.0;
+
    outEntry = curPrice;
    outSl = hp2 + atr * 0.25;
    double risk = MathAbs(outSl - outEntry);
@@ -1426,13 +1817,17 @@ bool DetectRisingWedge(const string sym, const MqlRates &rates[], int totalBars,
    double rr = MathAbs(outTp - outEntry) / risk;
    if(rr < InpMinRR - 0.05) return false;
 
-   double convScore = MathMin(1.0, (slopeL - slopeH) / slopeL) * 30.0;
-   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 30.0;
-   outScore = MathMin(99.0, convScore + contractScore + wedgeDivScore + 20.0);
+   double convScore = MathMin(1.0, (slopeL - slopeH) / slopeL) * 25.0;
+   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 25.0;
+
+   double rawScore = convScore + contractScore + wedgeDivScore + volScore + alphaBonus + 20.0;
+   double mult = GetPatternMultiplier(2);
+   outScore = MathMin(99.0, MathMax(0.0, rawScore * mult));
+
    outTag = "RISING_WEDGE_BREAKDOWN";
    if(wedgeBearDiv) outTag += "_RSI_DIV";
 
-   return (outScore >= 80.0);
+   return (outScore >= 82.0);
 }
 
 // 4. Falling Wedge Pattern (Descending Wedge - Bullish Breakout)
@@ -1441,9 +1836,16 @@ bool DetectFallingWedge(const string sym, const MqlRates &rates[], int totalBars
 {
    if(totalBars < 40 || atr <= 0.0) return false;
    if(IsCounterSpikeTrade(sym, true)) return false;
+   if(IsPatternQuarantined(3)) return false; // Online Learning pattern quarantine
 
    int curBar = totalBars - 1;
    double curPrice = rates[curBar].close;
+
+   // Real body pureness check
+   double barRange = rates[curBar].high - rates[curBar].low;
+   if(barRange <= 0.0) return false;
+   double bodyRatio = MathAbs(rates[curBar].close - rates[curBar].open) / barRange;
+   if(bodyRatio < 0.25) return false;
 
    int h1 = -1, h2 = -1, l1 = -1, l2 = -1;
    double hp1 = 0, hp2 = 0, lp1 = 0, lp2 = 0;
@@ -1489,6 +1891,11 @@ bool DetectFallingWedge(const string sym, const MqlRates &rates[], int totalBars
    bool wedgeBullDiv = (rsiL2 >= rsiL1);
    double wedgeDivScore = wedgeBullDiv ? 18.0 : 0.0;
 
+   // Volatility Regime
+   double volRatio = GetVolatilityRegimeRatio(sym, PERIOD_M5);
+   double volScore = (volRatio >= 0.85 && volRatio <= 1.85) ? 10.0 : ((volRatio < 0.70) ? -14.0 : 0.0);
+   double alphaBonus = IsSymbolAlphaTier(sym) ? 8.0 : 0.0;
+
    outEntry = curPrice;
    outSl = lp2 - atr * 0.25;
    double risk = MathAbs(outEntry - outSl);
@@ -1498,13 +1905,17 @@ bool DetectFallingWedge(const string sym, const MqlRates &rates[], int totalBars
    double rr = MathAbs(outTp - outEntry) / risk;
    if(rr < InpMinRR - 0.05) return false;
 
-   double convScore = MathMin(1.0, (slopeL - slopeH) / MathAbs(slopeH)) * 30.0;
-   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 30.0;
-   outScore = MathMin(99.0, convScore + contractScore + wedgeDivScore + 20.0);
+   double convScore = MathMin(1.0, (slopeL - slopeH) / MathAbs(slopeH)) * 25.0;
+   double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 25.0;
+
+   double rawScore = convScore + contractScore + wedgeDivScore + volScore + alphaBonus + 20.0;
+   double mult = GetPatternMultiplier(3);
+   outScore = MathMin(99.0, MathMax(0.0, rawScore * mult));
+
    outTag = "FALLING_WEDGE_BREAKOUT";
    if(wedgeBullDiv) outTag += "_RSI_DIV";
 
-   return (outScore >= 80.0);
+   return (outScore >= 82.0);
 }
 
 //+------------------------------------------------------------------+
@@ -2058,6 +2469,9 @@ string GetActivePrioritySymbol()
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   // 0. Update Online Machine Learning Brain & Dynamic Pattern Expectancy Weights
+   UpdateOnlineLearningBrain();
+
    // 1. Execute trades, trail stops, export live account & live bid/ask quotes every 1 second
    ProcessCommandQueue();
    ManageOpenPositionsAndTrailing();
@@ -2098,7 +2512,7 @@ void OnTimer()
    if(TimeCurrent() - g_lastLog > 30)
    {
       g_lastLog = TimeCurrent();
-      Print("PA_Pattern_Bridge v5.00 [PRICE ACTION 1s LIVE]: ActiveSym='", activeSym, "' | Watchlist=", g_brokerSymCount,
+      Print("PA_Pattern_Bridge v5.10 [ONLINE SELF-LEARNING & PRICE ACTION]: ActiveSym='", activeSym, "' | Watchlist=", g_brokerSymCount,
             " | Patterns: Double Tops/Bottoms, Wedges | Account #", AccountInfoInteger(ACCOUNT_LOGIN));
    }
 }

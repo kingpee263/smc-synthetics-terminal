@@ -2387,6 +2387,77 @@
     });
   }
 
+  /* ---------------- Real-Time ML Brain & Pattern Expectancy Matrix ---------------- */
+  async function loadAndRenderBrainMatrix() {
+    try {
+      const r = await fetch('/api/mt5/brain', { cache: 'no-store' });
+      if (!r.ok) return;
+      const data = await r.json();
+      if (!data) return;
+
+      if (Array.isArray(data.patterns)) {
+        const pMap = {
+          'DOUBLE_TOP': 'dt',
+          'DOUBLE_BOTTOM': 'db',
+          'RISING_WEDGE': 'rw',
+          'FALLING_WEDGE': 'fw'
+        };
+
+        for (const p of data.patterns) {
+          const prefix = pMap[p.name];
+          if (!prefix) continue;
+          const dEl = document.getElementById(`${prefix}Deals`);
+          const wEl = document.getElementById(`${prefix}WinRate`);
+          const eEl = document.getElementById(`${prefix}ExpR`);
+          const mEl = document.getElementById(`${prefix}Mult`);
+          const sEl = document.getElementById(`${prefix}Status`);
+
+          if (dEl) dEl.textContent = `${p.deals} (${p.wins}W / ${p.losses}L)`;
+          if (wEl) {
+            wEl.textContent = `${p.winRate.toFixed(1)}%`;
+            wEl.style.color = p.winRate >= 60 ? '#22c55e' : (p.winRate < 40 ? '#f43f5e' : '#fbbf24');
+          }
+          if (eEl) {
+            eEl.textContent = `${p.expectancyR >= 0 ? '+' : ''}${p.expectancyR.toFixed(2)}R`;
+            eEl.style.color = p.expectancyR >= 0.5 ? '#38bdf8' : (p.expectancyR < 0 ? '#f43f5e' : '#fbbf24');
+          }
+          if (mEl) {
+            mEl.textContent = `${p.multiplier.toFixed(2)}x`;
+            mEl.style.color = p.multiplier > 1.0 ? '#22c55e' : (p.multiplier < 1.0 ? '#f43f5e' : '#fbbf24');
+          }
+          if (sEl) {
+            if (p.quarantined) {
+              sEl.textContent = 'QUARANTINED';
+              sEl.style.background = 'rgba(244,63,94,0.2)';
+              sEl.style.color = '#f43f5e';
+            } else {
+              sEl.textContent = p.multiplier > 1.0 ? 'BOOSTED' : 'ACTIVE';
+              sEl.style.background = p.multiplier > 1.0 ? 'rgba(34,197,94,0.2)' : 'rgba(56,189,248,0.2)';
+              sEl.style.color = p.multiplier > 1.0 ? '#22c55e' : '#38bdf8';
+            }
+          }
+        }
+      }
+
+      const aEl = document.getElementById('matrixAlphaCount');
+      if (aEl && Array.isArray(data.alphaSymbols)) {
+        aEl.textContent = `${data.alphaSymbols.length} Pairs`;
+        const badge = document.getElementById('alphaPairBadge');
+        if (badge) badge.textContent = `${data.alphaSymbols.length} Alpha`;
+      }
+
+      const qEl = document.getElementById('matrixQuarCount');
+      if (qEl && Array.isArray(data.quarantinedSymbols)) {
+        qEl.textContent = `${data.quarantinedSymbols.length} Pairs`;
+      }
+
+      const updEl = document.getElementById('brainUpdatedText');
+      if (updEl && data.updated) {
+        updEl.textContent = new Date(data.updated * 1000).toLocaleTimeString();
+      }
+    } catch (e) {}
+  }
+
   /* ---------------- Real-Time MT5 State Poller ---------------- */
   async function pollLiveMt5State() {
     try {
@@ -2398,6 +2469,7 @@
         if (state.series) applyChartAnnotations(false);
       }
       loadAndRenderWeltradeScalper();
+      loadAndRenderBrainMatrix();
     } catch (e) {}
   }
 

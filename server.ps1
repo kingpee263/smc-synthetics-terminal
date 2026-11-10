@@ -248,6 +248,21 @@ while ($listener.IsListening) {
       continue
     }
 
+    # 3b. Live Online Learning Brain & Alpha Matrix (/api/mt5/brain)
+    if ($path -eq "/api/mt5/brain") {
+      $brainFile = Join-Path $commonSmcDir "ml_brain.json"
+      $brainJson = "{}"
+      if (Test-Path $brainFile) {
+        try { $brainJson = [System.IO.File]::ReadAllText($brainFile, [System.Text.Encoding]::UTF8) } catch {}
+      }
+      if ([string]::IsNullOrWhiteSpace($brainJson)) { $brainJson = '{"version":"5.10_ONLINE_LEARNING","patterns":[],"alphaSymbols":[],"quarantinedSymbols":[]}' }
+      $bytes = [System.Text.Encoding]::UTF8.GetBytes($brainJson)
+      $res.ContentType = "application/json; charset=utf-8"
+      $res.OutputStream.Write($bytes, 0, $bytes.Length)
+      $res.OutputStream.Close()
+      continue
+    }
+
     # 4. Multi-User Client Accounts API (/api/clients - GET, POST, DELETE)
     if ($path -eq "/api/clients") {
       if ($req.HttpMethod -eq "GET") {
