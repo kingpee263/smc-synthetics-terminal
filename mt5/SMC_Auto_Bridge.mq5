@@ -100,10 +100,25 @@ struct SSymbolStats
    datetime quarantineExpiry;
 };
 
-SPatternStats g_patterns[4];
-SSymbolStats  g_symbolStats[];
-int           g_symbolStatsCount = 0;
-datetime      g_lastBrainUpdate  = 0;
+struct SPairPatternEdge
+{
+   string   symbol;
+   int      patternIdx; // 0=DT, 1=DB, 2=RW, 3=FW
+   int      totalDeals;
+   int      wins;
+   int      losses;
+   double   netPnl;
+   double   winRate;
+   double   expectancyR;
+   double   multiplier;
+};
+
+SPatternStats    g_patterns[4];
+SSymbolStats     g_symbolStats[];
+int              g_symbolStatsCount = 0;
+SPairPatternEdge g_pairPatternEdges[140];
+int              g_pairPatternCount = 0;
+datetime         g_lastBrainUpdate  = 0;
 
 //+------------------------------------------------------------------+
 //| Detect whether this MT5 instance is connected to Weltrade        |
@@ -184,7 +199,7 @@ int OnInit()
    EventSetTimer(1); // 1-second real-time tick & active chart sync
 
    Print("=================================================================");
-   Print("Price Action & Online Self-Learning Bridge v5.10 initialized");
+   Print("Price Action & Online Neural Learning Bridge v6.0 initialized");
    Print("Account #", AccountInfoInteger(ACCOUNT_LOGIN), " (", AccountInfoString(ACCOUNT_SERVER), ") | Symbols=", g_brokerSymCount);
    Print("Balance: $", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2),
          " | Equity: $", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2));
@@ -450,7 +465,7 @@ bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBloc
          return false;
       }
 
-      // Explicitly allow only micro-safe volatility synthetics and major forex
+      // Explicitly allow only micro-safe volatility synthetics, alpha indices, and major forex
       bool isAllowedMicro = (StringFind(up, "VOLATILITY 75 (1S)") >= 0 ||
                              StringFind(up, "VOLATILITY 10 (1S)") >= 0 ||
                              StringFind(up, "VOLATILITY 50 (1S)") >= 0 ||
@@ -458,6 +473,9 @@ bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBloc
                              StringFind(up, "VOLATILITY 25 (1S)") >= 0 ||
                              StringFind(up, "VOLATILITY 75 INDEX") >= 0 ||
                              StringFind(up, "VOLATILITY 10 INDEX") >= 0 ||
+                             StringFind(up, "VOLATILITY 100 INDEX") >= 0 ||
+                             StringFind(up, "XAUUSD") >= 0 ||
+                             StringFind(up, "BOOM 500") >= 0 ||
                              StringFind(up, "EURUSD") >= 0 ||
                              StringFind(up, "USDJPY") >= 0 ||
                              StringFind(up, "GBPUSD") >= 0);
@@ -475,7 +493,7 @@ bool IsSymbolSafeForAccountTier(const string sym, double equity, string &outBloc
          StringFind(up, "MAX PAINX 2000") >= 0 || StringFind(up, "MAX GAINX 2000") >= 0 ||
          StringFind(up, "BREAKX 1800") >= 0 || StringFind(up, "SWITCHX 1800") >= 0 ||
          StringFind(up, "JUMP 100") >= 0 || StringFind(up, "JUMP 75") >= 0 || StringFind(up, "JUMP 50") >= 0 ||
-         StringFind(up, "VOLATILITY 100 INDEX") >= 0 || StringFind(up, "VOLATILITY 250") >= 0 || StringFind(up, "VOLATILITY 200") >= 0)
+         StringFind(up, "VOLATILITY 250") >= 0 || StringFind(up, "VOLATILITY 200") >= 0)
       {
          outBlockReason = StringFormat("Balance-Tier Shield ($%.2f < $100): Blocked heavy index %s", equity, sym);
          return false;
@@ -1246,7 +1264,7 @@ double GetVolatilityRegimeRatio(const string sym, ENUM_TIMEFRAMES tf)
 void ExportMLBrainJson()
 {
    string json = "{\n";
-   json += "  \"version\": \"5.10_ONLINE_LEARNING\",\n";
+   json += "  \"version\": \"6.0_NEURAL_LEARNING\",\n";
    json += "  \"updated\": " + IntegerToString((long)TimeCurrent()) + ",\n";
    json += "  \"patterns\": [\n";
    for(int p = 0; p < 4; p++)
@@ -1284,6 +1302,25 @@ void ExportMLBrainJson()
          json += "\"" + g_symbolStats[s].symbol + "\"";
       }
    }
+   json += "],\n";
+
+   json += "  \"pairPatternEdges\": [";
+   bool firstEdge = true;
+   for(int k = 0; k < g_pairPatternCount; k++)
+   {
+      if(g_pairPatternEdges[k].totalDeals > 0)
+      {
+         if(!firstEdge) json += ",";
+         firstEdge = false;
+         string patName = (g_pairPatternEdges[k].patternIdx == 0) ? "DOUBLE_TOP" :
+                          ((g_pairPatternEdges[k].patternIdx == 1) ? "DOUBLE_BOTTOM" :
+                          ((g_pairPatternEdges[k].patternIdx == 2) ? "RISING_WEDGE" : "FALLING_WEDGE"));
+         json += StringFormat("{\"symbol\":\"%s\",\"pattern\":\"%s\",\"deals\":%d,\"winRate\":%.1f,\"netPnl\":%.2f,\"expR\":%.2f,\"multiplier\":%.2f}",
+                              g_pairPatternEdges[k].symbol, patName, g_pairPatternEdges[k].totalDeals,
+                              g_pairPatternEdges[k].winRate, g_pairPatternEdges[k].netPnl,
+                              g_pairPatternEdges[k].expectancyR, g_pairPatternEdges[k].multiplier);
+      }
+   }
    json += "]\n";
    json += "}";
 
@@ -1298,12 +1335,18 @@ void ExportMLBrainJson()
 //+------------------------------------------------------------------+
 //| Continuous Online Learning Brain: Recalculate Weights from History|
 //+------------------------------------------------------------------+
+struct SDealEntryLookup
+{
+   long   posId;
+   string comment;
+};
+
 void UpdateOnlineLearningBrain()
 {
    if(TimeCurrent() - g_lastBrainUpdate < 15) return;
    g_lastBrainUpdate = TimeCurrent();
 
-   // Reset counters
+   // Reset pattern counters
    for(int p = 0; p < 4; p++)
    {
       g_patterns[p].totalDeals = 0;
@@ -1342,10 +1385,43 @@ void UpdateOnlineLearningBrain()
       }
    }
 
+   // Reset Pair-Pattern edge counts
+   for(int k = 0; k < g_pairPatternCount; k++)
+   {
+      g_pairPatternEdges[k].totalDeals = 0;
+      g_pairPatternEdges[k].wins = 0;
+      g_pairPatternEdges[k].losses = 0;
+      g_pairPatternEdges[k].netPnl = 0.0;
+   }
+
    // Scan past 14 days of closed deals
    if(HistorySelect(TimeCurrent() - 14 * 86400, TimeCurrent()))
    {
       int totalDeals = HistoryDealsTotal();
+
+      // Pass 1: Index all ENTRY_IN deals to preserve original pattern tags
+      SDealEntryLookup entries[];
+      int entryCount = 0;
+      for(int d = 0; d < totalDeals; d++)
+      {
+         ulong dt = HistoryDealGetTicket(d);
+         if(dt == 0) continue;
+         long entryType = HistoryDealGetInteger(dt, DEAL_ENTRY);
+         if(entryType == DEAL_ENTRY_IN)
+         {
+            long posId = HistoryDealGetInteger(dt, DEAL_POSITION_ID);
+            string c = HistoryDealGetString(dt, DEAL_COMMENT);
+            if(posId > 0 && StringLen(c) > 0)
+            {
+               ArrayResize(entries, entryCount + 1);
+               entries[entryCount].posId = posId;
+               entries[entryCount].comment = c;
+               entryCount++;
+            }
+         }
+      }
+
+      // Pass 2: Analyze all ENTRY_OUT deals with true entry comment resolution
       for(int d = totalDeals - 1; d >= 0; d--)
       {
          ulong dt = HistoryDealGetTicket(d);
@@ -1357,7 +1433,18 @@ void UpdateOnlineLearningBrain()
          if(StringLen(sym) == 0) continue;
 
          double pnl = HistoryDealGetDouble(dt, DEAL_PROFIT) + HistoryDealGetDouble(dt, DEAL_SWAP) + HistoryDealGetDouble(dt, DEAL_COMMISSION);
-         string comm = HistoryDealGetString(dt, DEAL_COMMENT);
+         long posId = HistoryDealGetInteger(dt, DEAL_POSITION_ID);
+         string comm = "";
+         for(int e = entryCount - 1; e >= 0; e--)
+         {
+            if(entries[e].posId == posId)
+            {
+               comm = entries[e].comment;
+               break;
+            }
+         }
+         if(StringLen(comm) == 0)
+            comm = HistoryDealGetString(dt, DEAL_COMMENT);
          StringToUpper(comm);
 
          // Map deal to pattern
@@ -1373,6 +1460,38 @@ void UpdateOnlineLearningBrain()
             g_patterns[pIdx].netPnl += pnl;
             if(pnl >= 0.0) g_patterns[pIdx].wins++;
             else           g_patterns[pIdx].losses++;
+
+            // Map to Pair-Pattern 2D Edge Matrix
+            int edgeIdx = -1;
+            for(int k = 0; k < g_pairPatternCount; k++)
+            {
+               if(g_pairPatternEdges[k].symbol == sym && g_pairPatternEdges[k].patternIdx == pIdx)
+               {
+                  edgeIdx = k;
+                  break;
+               }
+            }
+            if(edgeIdx < 0 && g_pairPatternCount < 140)
+            {
+               edgeIdx = g_pairPatternCount;
+               g_pairPatternEdges[edgeIdx].symbol = sym;
+               g_pairPatternEdges[edgeIdx].patternIdx = pIdx;
+               g_pairPatternEdges[edgeIdx].totalDeals = 0;
+               g_pairPatternEdges[edgeIdx].wins = 0;
+               g_pairPatternEdges[edgeIdx].losses = 0;
+               g_pairPatternEdges[edgeIdx].netPnl = 0.0;
+               g_pairPatternEdges[edgeIdx].winRate = 50.0;
+               g_pairPatternEdges[edgeIdx].expectancyR = 0.75;
+               g_pairPatternEdges[edgeIdx].multiplier = 1.0;
+               g_pairPatternCount++;
+            }
+            if(edgeIdx >= 0)
+            {
+               g_pairPatternEdges[edgeIdx].totalDeals++;
+               g_pairPatternEdges[edgeIdx].netPnl += pnl;
+               if(pnl >= 0.0) g_pairPatternEdges[edgeIdx].wins++;
+               else           g_pairPatternEdges[edgeIdx].losses++;
+            }
          }
 
          // Map deal to symbol
@@ -1428,6 +1547,33 @@ void UpdateOnlineLearningBrain()
       }
    }
 
+   // Recalculate Pair-Pattern Edge Multipliers
+   for(int k = 0; k < g_pairPatternCount; k++)
+   {
+      int deals = g_pairPatternEdges[k].totalDeals;
+      int wins  = g_pairPatternEdges[k].wins;
+      double wr = (deals > 0) ? (((double)wins / (double)deals) * 100.0) : 50.0;
+      double smoothWr = ((double)wins + 2.0) / ((double)deals + 4.0);
+      g_pairPatternEdges[k].winRate = wr;
+      g_pairPatternEdges[k].expectancyR = (smoothWr * 2.20) - ((1.0 - smoothWr) * 0.70);
+
+      if(deals >= 2)
+      {
+         if(smoothWr >= 0.65 && g_pairPatternEdges[k].netPnl > 0.0)
+            g_pairPatternEdges[k].multiplier = 1.25; // +25% boost on proven pair-pattern alpha
+         else if(smoothWr >= 0.55)
+            g_pairPatternEdges[k].multiplier = 1.10;
+         else if(smoothWr <= 0.35 || (deals >= 2 && wins == 0))
+            g_pairPatternEdges[k].multiplier = 0.75; // -25% penalty on underperforming combination
+         else
+            g_pairPatternEdges[k].multiplier = 1.00;
+      }
+      else
+      {
+         g_pairPatternEdges[k].multiplier = 1.00;
+      }
+   }
+
    // Recalculate Symbol Stats and Alpha Classification
    for(int s = 0; s < g_symbolStatsCount; s++)
    {
@@ -1471,6 +1617,19 @@ double GetPatternMultiplier(int patternIdx)
 {
    if(patternIdx < 0 || patternIdx >= 4) return 1.0;
    return g_patterns[patternIdx].adaptiveMultiplier;
+}
+
+double GetPairPatternMultiplier(const string sym, int patternIdx)
+{
+   double baseMult = GetPatternMultiplier(patternIdx);
+   for(int k = 0; k < g_pairPatternCount; k++)
+   {
+      if(g_pairPatternEdges[k].symbol == sym && g_pairPatternEdges[k].patternIdx == patternIdx)
+      {
+         return baseMult * g_pairPatternEdges[k].multiplier;
+      }
+   }
+   return baseMult;
 }
 
 bool IsSymbolAlphaTier(const string sym)
@@ -1609,7 +1768,7 @@ bool DetectDoubleTop(const string sym, const MqlRates &rates[], int totalBars, d
    double trigScore   = isNeckBreak ? 18.0 : 12.0;
 
    double rawScore = symmScore + heightScore + trigScore + divScore + trendScore + volScore + bodyBonus + alphaBonus;
-   double mult = GetPatternMultiplier(0);
+   double mult = GetPairPatternMultiplier(sym, 0);
    outScore = MathMin(99.0, MathMax(0.0, rawScore * mult));
 
    outTag = isNeckBreak ? "DOUBLE_TOP_NECK_BREAK" : "DOUBLE_TOP_PEAK_REJECT";
@@ -1733,7 +1892,7 @@ bool DetectDoubleBottom(const string sym, const MqlRates &rates[], int totalBars
    double trigScore   = isNeckBreak ? 18.0 : 12.0;
 
    double rawScore = symmScore + heightScore + trigScore + divScore + trendScore + volScore + bodyBonus + alphaBonus;
-   double mult = GetPatternMultiplier(1);
+   double mult = GetPairPatternMultiplier(sym, 1);
    outScore = MathMin(99.0, MathMax(0.0, rawScore * mult));
 
    outTag = isNeckBreak ? "DOUBLE_BOTTOM_NECK_BREAK" : "DOUBLE_BOTTOM_TROUGH_REJECT";
@@ -1820,8 +1979,16 @@ bool DetectRisingWedge(const string sym, const MqlRates &rates[], int totalBars,
    double convScore = MathMin(1.0, (slopeL - slopeH) / slopeL) * 25.0;
    double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 25.0;
 
-   double rawScore = convScore + contractScore + wedgeDivScore + volScore + alphaBonus + 20.0;
-   double mult = GetPatternMultiplier(2);
+   // Macro EMA(50) Trend Alignment
+   double ema50 = CalculateEMA(rates, curBar, 50);
+   bool withTrend = (rates[curBar].close <= ema50 + atr * 0.25);
+   double trendScore = withTrend ? 14.0 : 0.0;
+
+   // Decisive Real Candle Body Bonus
+   double bodyBonus = (bodyRatio >= 0.45) ? 8.0 : 0.0;
+
+   double rawScore = convScore + contractScore + wedgeDivScore + trendScore + volScore + bodyBonus + alphaBonus + 10.0;
+   double mult = GetPairPatternMultiplier(sym, 2);
    outScore = MathMin(99.0, MathMax(0.0, rawScore * mult));
 
    outTag = "RISING_WEDGE_BREAKDOWN";
@@ -1908,8 +2075,16 @@ bool DetectFallingWedge(const string sym, const MqlRates &rates[], int totalBars
    double convScore = MathMin(1.0, (slopeL - slopeH) / MathAbs(slopeH)) * 25.0;
    double contractScore = MathMin(1.0, (initWidth - apexWidth) / initWidth) * 25.0;
 
-   double rawScore = convScore + contractScore + wedgeDivScore + volScore + alphaBonus + 20.0;
-   double mult = GetPatternMultiplier(3);
+   // Macro EMA(50) Trend Alignment
+   double ema50 = CalculateEMA(rates, curBar, 50);
+   bool withTrend = (rates[curBar].close >= ema50 - atr * 0.25);
+   double trendScore = withTrend ? 14.0 : 0.0;
+
+   // Decisive Real Candle Body Bonus
+   double bodyBonus = (bodyRatio >= 0.45) ? 8.0 : 0.0;
+
+   double rawScore = convScore + contractScore + wedgeDivScore + trendScore + volScore + bodyBonus + alphaBonus + 10.0;
+   double mult = GetPairPatternMultiplier(sym, 3);
    outScore = MathMin(99.0, MathMax(0.0, rawScore * mult));
 
    outTag = "FALLING_WEDGE_BREAKOUT";
@@ -1984,11 +2159,15 @@ void EvaluateSymbolPureAPlus(const string sym)
    string reason = "";
    if(!CanOpenNewTrade(sym, "PA_PATTERN", reason)) return;
 
-   // Priority 1: M5 Intraday sniper patterns
+   // Priority 1: M1 Precision Micro-Sniper (Minimal risk distance, ideal for compounding $4-$15 Nano accounts)
+   if(EvaluateTimeframePriceAction(sym, PERIOD_M1, "M1"))
+      return;
+
+   // Priority 2: M5 Intraday momentum expansion
    if(EvaluateTimeframePriceAction(sym, PERIOD_M5, "M5"))
       return;
 
-   // Priority 2: M15 Structural patterns
+   // Priority 3: M15 Macro structural swings
    EvaluateTimeframePriceAction(sym, PERIOD_M15, "M15");
 }
 
@@ -2512,7 +2691,7 @@ void OnTimer()
    if(TimeCurrent() - g_lastLog > 30)
    {
       g_lastLog = TimeCurrent();
-      Print("PA_Pattern_Bridge v5.10 [ONLINE SELF-LEARNING & PRICE ACTION]: ActiveSym='", activeSym, "' | Watchlist=", g_brokerSymCount,
+      Print("PA_Pattern_Bridge v6.0 [ONLINE NEURAL FEEDBACK & PRICE ACTION]: ActiveSym='", activeSym, "' | Watchlist=", g_brokerSymCount,
             " | Patterns: Double Tops/Bottoms, Wedges | Account #", AccountInfoInteger(ACCOUNT_LOGIN));
    }
 }
